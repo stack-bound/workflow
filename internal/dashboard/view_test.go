@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/stack-bound/workflow/internal/registry"
 	"github.com/stack-bound/workflow/internal/workspace"
@@ -132,9 +133,13 @@ func TestConfirmPrompt(t *testing.T) {
 }
 
 func TestWorkspaceLine(t *testing.T) {
-	done := wsView("p", "calm", false)
-	if l := workspaceLine(&done); !strings.Contains(l, "○") || !strings.Contains(l, "done") {
-		t.Errorf("done line = %q", l)
+	clean := wsView("p", "calm", false)
+	if l := workspaceLine(&clean); !strings.Contains(l, "○") || !strings.Contains(l, "clean") {
+		t.Errorf("clean line = %q", l)
+	}
+	// "done" implied finished work; the clean state must not use it.
+	if l := workspaceLine(&clean); strings.Contains(l, "done") {
+		t.Errorf("clean line should not say done: %q", l)
 	}
 
 	active := wsView("p", "busy", true)
@@ -145,6 +150,80 @@ func TestWorkspaceLine(t *testing.T) {
 	bad := workspace.View{Worktree: registry.Worktree{Branch: "broken", Base: "main"}, StatErr: errors.New("missing")}
 	if l := workspaceLine(&bad); !strings.Contains(l, "!") || !strings.Contains(l, "missing") {
 		t.Errorf("error line = %q", l)
+	}
+}
+
+// TestWorkspaceStyled covers the accent-coloured row: branch and state text
+// survive styling, the dirty * shows for uncommitted work, and a stat error
+// degrades to the "! branch error" form.
+func TestWorkspaceStyled(t *testing.T) {
+	dirty := wsView("p", "busy", true)
+	dirty.Stat.Added, dirty.Stat.Deleted = 12, 3
+	l := workspaceStyled(&dirty)
+	for _, want := range []string{"busy", "active", "+12", "-3", "*"} {
+		if !strings.Contains(l, want) {
+			t.Errorf("active styled line missing %q: %q", want, l)
+		}
+	}
+
+	clean := wsView("p", "calm", false)
+	l = workspaceStyled(&clean)
+	if !strings.Contains(l, "calm") || !strings.Contains(l, "clean") {
+		t.Errorf("clean styled line = %q", l)
+	}
+	if strings.Contains(l, "*") {
+		t.Errorf("clean styled line should have no dirty marker: %q", l)
+	}
+
+	bad := workspace.View{Worktree: registry.Worktree{Branch: "broken", Base: "main"}, StatErr: errors.New("missing")}
+	if l := workspaceStyled(&bad); !strings.Contains(l, "!") || !strings.Contains(l, "missing") {
+		t.Errorf("error styled line = %q", l)
+	}
+}
+
+// TestBehindAheadOrder pins the column to behind-first (↓) then ahead (↑), each
+// arrow bound to its own count, matching the "behind ahead" heading.
+func TestBehindAheadOrder(t *testing.T) {
+	v := wsView("p", "lagging", false)
+	v.Stat.Behind, v.Stat.Ahead = 3, 0
+	if got := behindAhead(&v); got != "↓3|↑0" {
+		t.Errorf("behindAhead = %q, want %q", got, "↓3|↑0")
+	}
+	v.Stat.Behind, v.Stat.Ahead = 1, 5
+	if got := behindAhead(&v); got != "↓1|↑5" {
+		t.Errorf("behindAhead = %q, want %q", got, "↓1|↑5")
+	}
+}
+
+// TestLedgerHeaderAndLegend asserts the new column headings and the glyph key
+// render into the ledger view so the numbers and symbols are self-explaining.
+func TestLedgerHeaderAndLegend(t *testing.T) {
+	out := readyModel(t).View()
+	for _, want := range []string{
+		"branch", "state", "behind|ahead", "diff", "base", // column headings
+		"● active", "○ clean", "▣ tmux open", // glyph key
+		"↓behind|↑ahead", "+added", "-removed", "* uncommitted", // column key
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("ledger view missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestLedgerHeaderAlignsWithRow checks the heading's "branch" label sits at the
+// same display column as the branch name in a rendered row below it, so the
+// table reads straight down. Byte offsets differ (the status mark is multibyte),
+// so the comparison is on visible width.
+func TestLedgerHeaderAlignsWithRow(t *testing.T) {
+	m := readyModel(t)
+	m.cursor = 0                     // project selected → the workspace rows render unselected (accent-styled)
+	row := m.renderRow(1, m.rows[1]) // alpha/feat-1
+	h := ledgerHeader()
+
+	hCol := lipgloss.Width(h[:strings.Index(h, "branch")])
+	rCol := lipgloss.Width(row[:strings.Index(row, "feat-1")])
+	if hCol != rCol {
+		t.Errorf("branch heading at col %d, branch name at col %d:\nhdr: %q\nrow: %q", hCol, rCol, h, row)
 	}
 }
 
