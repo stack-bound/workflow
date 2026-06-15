@@ -174,3 +174,80 @@ func KillWindow(id string) error {
 	_, err := run("kill-window", "-t", id)
 	return err
 }
+
+// WindowName builds a window name with the status glyph prefixed:
+// "<glyph> <branch>". So the status icon sits inside the tab, in a fixed slot
+// just after tmux's index, and the layout never shifts (an empty glyph yields
+// just the branch). In color_mode "glyph" with a color set, only the glyph is
+// wrapped in an inline tmux style ("#[fg=colourN]<glyph>#[default] <branch>");
+// note inline styles inside a window name are tmux-version-sensitive, which is
+// why "tab" is the default mode. It is pure so it is unit-testable.
+func WindowName(glyph, branch, mode, color string) string {
+	if glyph == "" {
+		return branch
+	}
+	if mode == "glyph" && color != "" {
+		return fmt.Sprintf("#[fg=colour%s]%s#[default] %s", color, glyph, branch)
+	}
+	return glyph + " " + branch
+}
+
+// StyleOp is one per-window tmux option to apply (or unset). It is the unit
+// TabStyleOps emits so the whole-tab coloring logic stays pure/testable.
+type StyleOp struct {
+	Option string // e.g. "window-status-current-style"
+	Value  string // style value when setting
+	Unset  bool   // when true, remove the per-window override (inherit again)
+}
+
+// TabStyleOps returns the per-window option operations that color the WHOLE tab
+// for color_mode "tab": both the current and non-current window-status styles
+// get a foreground color. When color is empty (idle) the ops UNSET the
+// per-window override so the tab inherits the user's own theme again rather than
+// a hardcoded default. Returns nil for any other mode (no tab styling). Pure.
+func TabStyleOps(mode, color string) []StyleOp {
+	if mode != "tab" {
+		return nil
+	}
+	opts := []string{"window-status-style", "window-status-current-style"}
+	ops := make([]StyleOp, 0, len(opts))
+	for _, o := range opts {
+		if color == "" {
+			ops = append(ops, StyleOp{Option: o, Unset: true})
+		} else {
+			ops = append(ops, StyleOp{Option: o, Value: "fg=colour" + color})
+		}
+	}
+	return ops
+}
+
+// RenameWindow sets a window's name.
+func RenameWindow(id, name string) error {
+	_, err := run("rename-window", "-t", id, name)
+	return err
+}
+
+// ApplyWindowStyle applies (or unsets) per-window style options on a window.
+func ApplyWindowStyle(id string, ops []StyleOp) error {
+	for _, op := range ops {
+		var err error
+		if op.Unset {
+			_, err = run("set-window-option", "-u", "-t", id, op.Option)
+		} else {
+			_, err = run("set-window-option", "-t", id, op.Option, op.Value)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CurrentWindowID returns the window id containing the caller's pane
+// ($TMUX_PANE), used as a fallback when a workspace's window is not tagged.
+func CurrentWindowID() (string, error) {
+	if pane := os.Getenv("TMUX_PANE"); pane != "" {
+		return run("display-message", "-p", "-t", pane, "#{window_id}")
+	}
+	return run("display-message", "-p", "#{window_id}")
+}

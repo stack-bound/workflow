@@ -21,11 +21,15 @@ func newSidebarCmd() *cobra.Command {
 			if !tmux.Available() {
 				return fmt.Errorf("sidebar needs a tmux session (no $TMUX detected)")
 			}
+			g, err := config.LoadGlobal()
+			if err != nil {
+				return err
+			}
 			rp, err := config.RegistryPath()
 			if err != nil {
 				return err
 			}
-			return sidebar.Run(rp)
+			return sidebar.Run(rp, g.StatusLook())
 		},
 	}
 }

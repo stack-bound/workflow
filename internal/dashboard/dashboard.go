@@ -13,10 +13,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/git"
 	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/status"
 	"github.com/stack-bound/workflow/internal/tmux"
 	"github.com/stack-bound/workflow/internal/workspace"
 )
@@ -90,7 +92,10 @@ type Model struct {
 	rows      []row
 	cursor    int
 	mode      mode
-	openPaths map[string]bool // worktree paths with a tmux window open right now
+	openPaths map[string]bool         // worktree paths with a tmux window open right now
+	statuses  map[string]status.State // worktree path → live (TTL-resolved) agent status
+
+	watcher *fsnotify.Watcher // watches the status dir for instant updates
 
 	vp          viewport.Model
 	diffTitle   string
@@ -114,8 +119,16 @@ type Model struct {
 type ledgerMsg struct {
 	projects  []workspace.ProjectView
 	openPaths map[string]bool
+	statuses  map[string]status.State
 	err       error
 }
+
+// statusChangedMsg fires when the status dir changes (an agent updated its
+// state); it triggers an immediate refresh. watcherReadyMsg carries the lazily
+// created fsnotify watcher back onto the model.
+type statusChangedMsg struct{}
+
+type watcherReadyMsg struct{ w *fsnotify.Watcher }
 
 type diffMsg struct {
 	title   string
@@ -158,9 +171,10 @@ func Run(mgr *workspace.Manager, global *config.Global) error {
 	return err
 }
 
-// Init kicks off the first refresh and the auto-refresh tick.
+// Init kicks off the first refresh, the auto-refresh tick (a safety net), and
+// the fsnotify watcher that makes status updates feel instant.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), tickCmd())
+	return tea.Batch(m.refreshCmd(), tickCmd(), watchStatusCmd())
 }
 
 // --- commands ---
@@ -171,6 +185,7 @@ func tickCmd() tea.Cmd {
 
 func (m Model) refreshCmd() tea.Cmd {
 	inTmux := m.inTmux
+	ttl := m.global.StatusLook().TTL
 	return func() tea.Msg {
 		pv, err := m.mgr.Ledger()
 		msg := ledgerMsg{projects: pv, err: err}
@@ -181,7 +196,84 @@ func (m Model) refreshCmd() tea.Cmd {
 				msg.openPaths = open
 			}
 		}
+		// Read each workspace's agent status (TTL-resolved). This is the safety
+		// net; fsnotify drives the instant updates between refreshes.
+		msg.statuses = readStatuses(pv, ttl)
 		return msg
+	}
+}
+
+// readStatuses reads each workspace's status file and resolves it through the
+// TTL so a stale working/waiting renders as idle.
+func readStatuses(projects []workspace.ProjectView, ttl time.Duration) map[string]status.State {
+	now := time.Now()
+	out := make(map[string]status.State)
+	for _, pv := range projects {
+		for _, v := range pv.Workspaces {
+			wt := v.Worktree
+			st, ok, err := status.ReadFor(wt.Project, wt.Branch, wt.Path)
+			if err != nil || !ok {
+				continue
+			}
+			out[wt.Path] = status.Effective(st.State, st.TS, ttl, now)
+		}
+	}
+	return out
+}
+
+// watchStatusCmd creates the fsnotify watcher on the status dir (creating the
+// dir first — fsnotify silently no-ops on a missing path) and hands it back via
+// watcherReadyMsg. It returns nil on any failure, leaving the 4s tick as the
+// fallback.
+func watchStatusCmd() tea.Cmd {
+	return func() tea.Msg {
+		dir, err := status.EnsureDir()
+		if err != nil {
+			return nil
+		}
+		w, err := fsnotify.NewWatcher()
+		if err != nil {
+			return nil
+		}
+		if err := w.Add(dir); err != nil {
+			_ = w.Close()
+			return nil
+		}
+		return watcherReadyMsg{w: w}
+	}
+}
+
+// listenStatusCmd blocks for one watcher event, coalesces any immediate burst,
+// and emits a single statusChangedMsg. It is re-issued after each event to keep
+// listening.
+func (m Model) listenStatusCmd() tea.Cmd {
+	w := m.watcher
+	if w == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		select {
+		case _, ok := <-w.Events:
+			if !ok {
+				return nil
+			}
+		case _, ok := <-w.Errors:
+			if !ok {
+				return nil
+			}
+		}
+		// Coalesce a burst of writes (a hook may touch several files) into one
+		// refresh by draining whatever is already queued.
+		for {
+			select {
+			case _, ok := <-w.Events:
+				if !ok {
+					return statusChangedMsg{}
+				}
+			default:
+				return statusChangedMsg{}
+			}
+		}
 	}
 }
 
@@ -224,7 +316,7 @@ func (m Model) openWindowCmd(project, branch string) tea.Cmd {
 		if err != nil {
 			return actionMsg{err: err}
 		}
-		if err := launcher.NewTmux().Open(path, branch); err != nil {
+		if err := launcher.NewTmux().Open(path, launcher.IdleName(m.global, branch)); err != nil {
 			return actionMsg{err: err}
 		}
 		return actionMsg{msg: "opened window for " + branch, refresh: true}
@@ -273,10 +365,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setRows(msg.projects)
 		m.openPaths = msg.openPaths
+		m.statuses = msg.statuses
 		if m.status == "loading…" {
 			m.status, m.statusErr = "", false
 		}
 		return m, nil
+
+	case watcherReadyMsg:
+		m.watcher = msg.w
+		return m, m.listenStatusCmd()
+
+	case statusChangedMsg:
+		// An agent changed state: refresh now and keep listening.
+		return m, tea.Batch(m.refreshCmd(), m.listenStatusCmd())
 
 	case diffMsg:
 		if msg.err != nil {

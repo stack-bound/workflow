@@ -32,6 +32,9 @@ type Global struct {
 	// WorktreeDir is a default base directory for worktrees. When empty a
 	// sibling directory ("<repo>_worktrees") is used.
 	WorktreeDir string `yaml:"worktree_dir,omitempty"`
+	// Status tunes the agent-status icons/colors shown in tmux tabs, the
+	// dashboard, and the sidebar. Absent means defaults (see StatusConfig).
+	Status *StatusConfig `yaml:"status,omitempty"`
 }
 
 // Repo is the optional per-repository configuration read from .workFlow.yaml

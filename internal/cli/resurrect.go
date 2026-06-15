@@ -25,7 +25,7 @@ func newResurrectCmd() *cobra.Command {
 			if !tmux.Available() {
 				return fmt.Errorf("resurrect needs a tmux session (no $TMUX detected)")
 			}
-			m, _, err := manager()
+			m, g, err := manager()
 			if err != nil {
 				return err
 			}
@@ -43,7 +43,7 @@ func newResurrectCmd() *cobra.Command {
 					missing++ // worktree gone from disk; nothing to bind
 					continue
 				}
-				made, err := lt.EnsureWindow(path, v.Worktree.Branch)
+				made, err := lt.EnsureWindow(path, launcher.IdleName(g, v.Worktree.Branch))
 				if err != nil {
 					_, _ = fmt.Fprintf(out, "  %s/%s: %v\n", v.Worktree.Project, v.Worktree.Branch, err)
 					continue
