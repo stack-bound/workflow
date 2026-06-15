@@ -135,12 +135,7 @@ func (m Model) footer() string {
 	case m.mode == modeInput:
 		status = m.input.View()
 	case m.mode == modeConfirm:
-		c := m.confirm
-		verb := "Merge"
-		if c.action == "rm" {
-			verb = "Remove (discard, deletes branch + unmerged work for)"
-		}
-		status = errStyle.Render(fmt.Sprintf("%s %s/%s? [y/n]", verb, c.project, c.branch))
+		status = m.confirm.prompt()
 	case m.status != "":
 		if m.statusErr {
 			status = errStyle.Render(m.status)
@@ -165,6 +160,44 @@ func (m Model) footer() string {
 		help = "↑/↓ move · enter diff · a add · " + openHelp + " · c copy · m merge · x rm · r refresh · q quit"
 	}
 	return "\n" + status + "\n" + helpStyle.Render(help)
+}
+
+// prompt renders the y/n confirmation line for a pending action. Merge is a
+// plain caution; remove first weighs whether the workspace still holds work
+// that deletion would discard — uncommitted changes or commits not yet on
+// base — warning in red when it does (or when status is unknown) and
+// reassuring in green when the branch is safe to drop.
+func (c confirm) prompt() string {
+	if c.action != "rm" {
+		return errStyle.Render(fmt.Sprintf("Merge %s/%s? [y/n]", c.project, c.branch))
+	}
+	if risk := c.removeRisk(); risk != "" {
+		return errStyle.Render(fmt.Sprintf("Remove %s/%s? This discards %s — work will be lost. Are you sure? [y/n]", c.project, c.branch, risk))
+	}
+	return okStyle.Render(fmt.Sprintf("Safe to remove %s/%s: no uncommitted changes, nothing unmerged vs %s. Are you sure? [y/n]", c.project, c.branch, c.base))
+}
+
+// removeRisk describes the work that removing this workspace would lose, or ""
+// when the branch is clean and fully merged into base (safe to drop). Note the
+// +/- diff counts are deliberately *not* used as a safety signal: a branch that
+// is merely behind base shows a non-zero diff while holding no work of its own.
+// A failed status check returns a cautious note rather than vouching for safety.
+func (c confirm) removeRisk() string {
+	if c.statErr {
+		return "changes that couldn't be verified (git status unavailable)"
+	}
+	var parts []string
+	if c.stat.Dirty {
+		parts = append(parts, "uncommitted changes")
+	}
+	if c.stat.Ahead > 0 {
+		noun := "commit"
+		if c.stat.Ahead > 1 {
+			noun = "commits"
+		}
+		parts = append(parts, fmt.Sprintf("%d unmerged %s (+%d -%d vs %s)", c.stat.Ahead, noun, c.stat.Added, c.stat.Deleted, c.base))
+	}
+	return strings.Join(parts, " and ")
 }
 
 // colorizeDiff applies semantic colors to a unified diff for the viewport.
