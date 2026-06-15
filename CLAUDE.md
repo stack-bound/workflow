@@ -14,7 +14,7 @@ go test ./...             # run tests
 golangci-lint run         # lint (config: .golangci.yml)
 ```
 
-There is no Makefile; the release build is driven by `goreleaser` (`.goreleaser.yaml`).
+A `Makefile` wraps the common tasks: `make build`, `make test`, `make test-coverage` (runs all tests and prints per-function + total coverage), `make lint`, and `make clean`. The release build is driven by `goreleaser` (`.goreleaser.yaml`).
 
 ## Changelog — use `clog`, never hand-edit CHANGELOG.md
 
