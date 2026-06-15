@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mattnelsonuk/workflow"
 	"github.com/mattnelsonuk/workflow/internal/config"
 	"github.com/mattnelsonuk/workflow/internal/workspace"
 	"github.com/spf13/cobra"
@@ -24,6 +25,7 @@ func newRootCmd() *cobra.Command {
 		Use:           "wf",
 		Short:         "WorkFlow — orchestrate git worktree workspaces from one cockpit",
 		Long:          "WorkFlow (wf) manages an isolated git worktree per piece of work,\nshows them all with live git status, and lets you review, merge, and clean up.",
+		Version:       workflow.Version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// No subcommand: show the ledger (the dashboard arrives in M2).
@@ -48,6 +50,7 @@ func newRootCmd() *cobra.Command {
 		newInitCmd(),
 		newConfigCmd(),
 		newCompletionsCmd(),
+		newVersionCmd(),
 	)
 	return root
 }

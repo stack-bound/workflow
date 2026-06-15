@@ -6,10 +6,26 @@ one cockpit. Written in Go.
 
 ## Install
 
+### One-line install (no sudo)
+
 ```sh
-go build -o wf ./cmd/wf
-# then put ./wf on your PATH, e.g.
-go install ./cmd/wf
+curl -sSfL https://raw.githubusercontent.com/mattnelsonuk/workflow/master/install.sh | sh
+```
+
+This detects your OS and architecture, downloads the latest release, installs the
+`wf` binary to `~/.local/bin` (no sudo required), adds that directory to your
+`PATH` if it isn't already, and installs shell completions for bash, zsh, or fish.
+
+To install somewhere else, set `INSTALL_DIR`:
+
+```sh
+INSTALL_DIR=~/bin curl -sSfL https://raw.githubusercontent.com/mattnelsonuk/workflow/master/install.sh | sh
+```
+
+### From source
+
+```sh
+go install github.com/mattnelsonuk/workflow/cmd/wf@latest
 ```
 
 Requires `git`. A clipboard helper (`xclip`/`xsel`/`wl-clipboard`/`pbcopy`) is

@@ -1,0 +1,88 @@
+name: Release
+
+# Releases are driven by the VERSION file. Your local `release` flow merges the
+# changelog.d fragments into CHANGELOG.md, writes the new version to VERSION, and
+# tags the commit. Pushing master then publishes the matching GitHub release.
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Read version from VERSION file
+        id: version
+        run: |
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION file is empty"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Skip if this release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $TAG already exists — nothing to do. Bump VERSION to cut a new one."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Print the block under "## [VERSION]" up to the next "## [" entry or
+          # the trailing "# Notes" footer.
+          awk -v ver="$VERSION" '
+            /^## \[/ { if (found) exit; if (index($0, "## [" ver "]")) found=1 }
+            found && /^# / { exit }
+            found { print }
+          ' CHANGELOG.md > /tmp/RELEASE_NOTES.md
+          if [ ! -s /tmp/RELEASE_NOTES.md ]; then
+            echo "::error::No CHANGELOG.md entry found for version $VERSION (expected a '## [$VERSION]' heading)"
+            exit 1
+          fi
+          echo "----- release notes -----"
+          cat /tmp/RELEASE_NOTES.md
+
+      - name: Create and push tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists locally; reusing it."
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+          fi
+          git push origin "$TAG"
+
+      - uses: goreleaser/goreleaser-action@v6
+        if: steps.check.outputs.exists == 'false'
+        with:
+          version: latest
+          args: release --clean --release-notes=/tmp/RELEASE_NOTES.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

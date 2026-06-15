@@ -1,0 +1,30 @@
+version: 2
+
+builds:
+  - main: ./cmd/wf
+    binary: wf
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      # Version is embedded from the VERSION file (see version.go), so no -X
+      # injection is needed here — just strip the binary.
+      - -s -w
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "wf_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: mattnelsonuk
+    name: workflow
