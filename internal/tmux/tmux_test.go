@@ -46,6 +46,20 @@ func TestInsideReflectsEnv(t *testing.T) {
 	}
 }
 
+func TestAvailable(t *testing.T) {
+	t.Setenv("TMUX", "")
+	if Available() {
+		t.Error("Available() true without a tmux session")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		return // can't assert the positive case without the tmux binary
+	}
+	t.Setenv("TMUX", "/tmp/x,1,0")
+	if !Available() {
+		t.Error("Available() false with TMUX set and tmux on PATH")
+	}
+}
+
 // --- isolated-server integration ---
 
 // tmuxBin skips the test when tmux is unavailable; otherwise it returns its path.

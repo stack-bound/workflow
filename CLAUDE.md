@@ -16,6 +16,32 @@ golangci-lint run         # lint (config: .golangci.yml)
 
 A `Makefile` wraps the common tasks: `make build`, `make test`, `make test-coverage` (runs all tests and prints per-function + total coverage), `make lint`, and `make clean`. The release build is driven by `goreleaser` (`.goreleaser.yaml`).
 
+## Tests — write them for any code you add
+
+**Every change ships with tests.** Do not leave new code untested — it drops
+coverage and lets regressions through.
+
+- **Cover what you write.** New function or branch → a test exercises it. Run
+  `make test-coverage` after a change and confirm the **total did not drop**; if
+  it did, you left something untested. Match the existing per-package style
+  (`internal/*/*_test.go`).
+- **Unit-test pure logic directly** (parsers, model `Update`/`View` via the
+  `step(m, msg)` pattern, slug/sort/format helpers) — this is where most coverage
+  comes from and needs no real git/tmux.
+- **Integration-test shell-out paths** against an isolated sandbox: a private
+  `XDG_CONFIG_HOME` for the registry, a throwaway `git init` repo, and a private
+  tmux server (see the tmux section below). Guard with a skip when the binary
+  (`git`/`tmux`) is absent.
+- **Assert on engine/registry state, not captured stdout, for CLI commands.**
+  Most commands print with `fmt.Println`/`Printf` to `os.Stdout`, which the cobra
+  test buffer does **not** capture — asserting on it silently passes (and
+  `strings.Contains(x, "")` is always true). Read the registry or query the
+  sandbox instead. (Commands that use `cmd.OutOrStdout()` — e.g. `list`,
+  `resurrect`, `close` — are safe to assert on.)
+- It's fine to leave the Bubble Tea program loop (`Run`) and `tea.Cmd` closures
+  that only shell out uncovered — that's the established untested surface — but
+  cover everything around them.
+
 ## Changelog — use `clog`, never hand-edit CHANGELOG.md
 
 This repo tracks changelog entries as YAML **fragments** in `changelog.d/<branch>.yaml`, managed by the `clog` tool (must be on PATH). At release time `clog release` merges all fragments into `CHANGELOG.md` and deletes them. **Do not edit `CHANGELOG.md` directly** — add a fragment instead.
