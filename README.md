@@ -39,7 +39,7 @@ wf project add                 # register the current repo as a project
 wf add feature-x               # create a branch + worktree (+ run setup)
 wf list                        # see every workspace with live git status
 wf path feature-x              # print the worktree path (for shell cd)
-wf open feature-x              # open the worktree in $EDITOR
+wf open feature-x              # jump to its tmux window (or open it in $EDITOR)
 wf merge feature-x             # merge into base, then remove worktree + branch
 wf rm feature-x                # remove a workspace without merging
 ```
@@ -54,10 +54,13 @@ wf rm feature-x                # remove a workspace without merging
 | `wf add <branch>` | Create a branch + worktree workspace and run setup |
 | `wf list` (`ls`) | List workspaces with live status (`--json` for scripts) |
 | `wf path <branch>` | Print a workspace's filesystem path |
-| `wf open <branch>` | Open a workspace in your editor |
+| `wf open <branch>` | Jump to the workspace's tmux window (or open it in your editor outside tmux; `--editor` forces the editor) |
+| `wf close <branch>` | Close the workspace's tmux window (keeps the worktree and branch) |
 | `wf copy <branch>` | Copy a workspace path to the clipboard |
 | `wf merge <branch>` | Merge into base, then remove the worktree, branch, and registration |
 | `wf rm <branch>` | Remove a workspace (worktree + branch + registration) without merging |
+| `wf resurrect` | Recreate tmux windows for tracked workspaces (after a tmux/computer restart) |
+| `wf sidebar` | Live strip of the workspace windows open right now (tmux) |
 | `wf init` | Write an example `.workFlow.yaml` in the current repo |
 | `wf config` | Manage global config (`path`, `show`, `edit`) |
 | `wf completions <shell>` | Print a completion script; `wf completions install [shell]` installs it |
@@ -75,6 +78,29 @@ auto-load theirs; for zsh it prints the one-time `fpath` line to add).
 
 A workspace is referenced by its **branch name**. When the same branch exists in
 two projects, disambiguate with `--project <name>`.
+
+## Dashboard & tmux
+
+Run `wf` with no command to open the **dashboard** — a cross-project ledger of
+projects → workspaces with live git status, an active/done flag, a scrollable
+diff viewer, and actions (add, open, copy, merge, rm). It works in any terminal;
+when stdout is not a TTY, `wf` prints the plain list instead.
+
+When you run inside **tmux**, WorkFlow lights up as a *guest* — it creates real
+windows in your current session (one per workspace) that you navigate with your
+own keys; it never wraps or owns your session.
+
+- `wf add` gives the new workspace a tmux window; `wf open` jumps to it (creating
+  it on demand); `wf close` kills it; `merge`/`rm` close it as they clean up.
+- In the dashboard, `t` jumps to a workspace's window and a `▣` marks workspaces
+  whose window is open right now.
+- After a tmux or machine restart, `wf resurrect` recreates the windows for every
+  tracked workspace.
+- `wf sidebar` is a thin, always-on strip of the windows open right now — run it
+  in a split pane.
+
+Outside tmux these commands fall back gracefully: `open` uses your editor, and
+the window-only commands report that no tmux session was detected.
 
 ## Configuration
 

@@ -82,7 +82,13 @@ func (m Model) renderRow(i int, r row) string {
 		return prefix + projectStyle.Render(text)
 	}
 
-	text = "  " + workspaceLine(r.view)
+	// A leading ▣ marks a workspace with a tmux window open right now (derived
+	// live each refresh); a plain indent keeps the columns aligned otherwise.
+	indent := "  "
+	if r.view != nil && m.openPaths[r.view.Worktree.Path] {
+		indent = "▣ "
+	}
+	text = indent + workspaceLine(r.view)
 	if selected {
 		return prefix + selectedStyle.Render(text)
 	}
@@ -150,7 +156,13 @@ func (m Model) footer() string {
 	case modeConfirm:
 		help = "y confirm · n cancel"
 	default:
-		help = "↑/↓ move · enter diff · a add · o open · c copy · m merge · x rm · r refresh · q quit"
+		// Inside tmux, "o" opens the editor and "t" jumps to the window; without
+		// tmux there is just the single "open".
+		openHelp := "o open"
+		if m.inTmux {
+			openHelp = "o edit · t term"
+		}
+		help = "↑/↓ move · enter diff · a add · " + openHelp + " · c copy · m merge · x rm · r refresh · q quit"
 	}
 	return "\n" + status + "\n" + helpStyle.Render(help)
 }

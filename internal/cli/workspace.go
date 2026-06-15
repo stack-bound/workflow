@@ -8,8 +8,18 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/tmux"
 	"github.com/stack-bound/workflow/internal/workspace"
 )
+
+// closeWindowBestEffort closes a workspace's tmux window after merge/rm. It is
+// best-effort: a tmux hiccup must never mask a successful merge or removal.
+func closeWindowBestEffort(path string) {
+	if !tmux.Available() {
+		return
+	}
+	_, _ = launcher.NewTmux().Close(path)
+}
 
 func newAddCmd() *cobra.Command {
 	var opts workspace.AddOptions
@@ -48,6 +58,16 @@ func newAddCmd() *cobra.Command {
 			}
 			fmt.Printf("Created workspace %s/%s (base %s)\n", wt.Project, wt.Branch, wt.Base)
 			fmt.Printf("  %s\n", wt.Path)
+			// In tmux, give the workspace a real window straight away (detached,
+			// so the setup output above stays put). Best-effort: a tmux failure
+			// must not undo a created workspace.
+			if tmux.Available() {
+				if made, werr := launcher.NewTmux().EnsureWindow(wt.Path, wt.Branch); werr != nil {
+					fmt.Printf("  (tmux window not created: %v)\n", werr)
+				} else if made {
+					fmt.Printf("  tmux window %q ready — jump with: wf open %s\n", wt.Branch, wt.Branch)
+				}
+			}
 			return nil
 		},
 	}
@@ -179,10 +199,14 @@ func newPathCmd() *cobra.Command {
 
 func newOpenCmd() *cobra.Command {
 	var project string
+	var editor bool
 	cmd := &cobra.Command{
 		Use:   "open <branch>",
-		Short: "Open a workspace in your editor (universal launcher)",
-		Args:  cobra.ExactArgs(1),
+		Short: "Open a workspace: jump to its tmux window, or open it in your editor",
+		Long: "Open a workspace. Inside tmux this jumps to the workspace's window " +
+			"(creating it if needed); otherwise it opens the worktree in your editor. " +
+			"Pass --editor to force the editor even inside tmux.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			m, g, err := manager()
 			if err != nil {
@@ -192,7 +216,46 @@ func newOpenCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if tmux.Available() && !editor {
+				return launcher.NewTmux().Open(path, args[0])
+			}
 			return launcher.NewUniversal(g).OpenInEditor(path)
+		},
+	}
+	cmd.Flags().StringVarP(&project, "project", "p", "", "scope to a project when the branch is ambiguous")
+	cmd.Flags().BoolVar(&editor, "editor", false, "open in the editor even inside tmux")
+	return cmd
+}
+
+func newCloseCmd() *cobra.Command {
+	var project string
+	cmd := &cobra.Command{
+		Use:   "close <branch>",
+		Short: "Close a workspace's tmux window (keeps the worktree and branch)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !tmux.Available() {
+				return fmt.Errorf("close needs a tmux session (no $TMUX detected)")
+			}
+			m, _, err := manager()
+			if err != nil {
+				return err
+			}
+			path, err := m.Path(args[0], project)
+			if err != nil {
+				return err
+			}
+			closed, err := launcher.NewTmux().Close(path)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if closed {
+				_, _ = fmt.Fprintf(out, "Closed the window for %s\n", args[0])
+			} else {
+				_, _ = fmt.Fprintf(out, "No open window for %s\n", args[0])
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVarP(&project, "project", "p", "", "scope to a project when the branch is ambiguous")
@@ -241,6 +304,7 @@ func newRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			closeWindowBestEffort(wt.Path)
 			fmt.Printf("Removed workspace %s/%s\n", wt.Project, wt.Branch)
 			return nil
 		},
@@ -265,6 +329,7 @@ func newMergeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			closeWindowBestEffort(wt.Path)
 			fmt.Printf("Merged %s into %s and cleaned up the workspace\n", wt.Branch, wt.Base)
 			return nil
 		},

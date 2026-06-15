@@ -17,11 +17,14 @@ import (
 
 // --- harness ---
 
-// isolateConfig points the global config + registry at a private dir.
+// isolateConfig points the global config + registry at a private dir. It also
+// clears $TMUX so tmux-aware commands (add/merge/rm) never touch a real tmux
+// server when the suite is run from inside tmux.
 func isolateConfig(t *testing.T) string {
 	t.Helper()
 	cfg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("TMUX", "")
 	return cfg
 }
 

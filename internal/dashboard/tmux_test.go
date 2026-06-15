@@ -1,0 +1,82 @@
+package dashboard
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stack-bound/workflow/internal/registry"
+	"github.com/stack-bound/workflow/internal/workspace"
+)
+
+// wsViewPath is like wsView but with a worktree path, for open-window tests.
+func wsViewPath(project, branch, path string) workspace.View {
+	return workspace.View{Worktree: registry.Worktree{Project: project, Branch: branch, Base: "main", Path: path}}
+}
+
+func TestTerminalKeyWithoutTmux(t *testing.T) {
+	m := readyModel(t)
+	m.inTmux = false
+	m.cursor = 1 // a workspace
+	m, cmd := step(m, runeKey("t"))
+	if cmd != nil {
+		t.Error("t without tmux should not return a command")
+	}
+	if !m.statusErr || !strings.Contains(m.status, "tmux not detected") {
+		t.Errorf("t without tmux → status=%q err=%v", m.status, m.statusErr)
+	}
+}
+
+func TestTerminalKeyInTmuxReturnsCommand(t *testing.T) {
+	m := readyModel(t)
+	m.inTmux = true
+	m.cursor = 1 // alpha/feat-1
+	_, cmd := step(m, runeKey("t"))
+	if cmd == nil {
+		t.Error("t in tmux on a workspace should return a jump command")
+	}
+
+	// On a project header it should do nothing (no workspace selected).
+	m.cursor = 0
+	_, cmd = step(m, runeKey("t"))
+	if cmd != nil {
+		t.Error("t on a project header should not return a command")
+	}
+}
+
+func TestRenderRowWindowOpenMarker(t *testing.T) {
+	m := readyModel(t)
+	open := wsViewPath("alpha", "live", "/wt/live")
+	r := row{kind: rowWorkspace, project: "alpha", view: &open}
+
+	// No marker when the path is not in the open set.
+	if got := m.renderRow(9, r); strings.Contains(got, "▣") {
+		t.Errorf("unopened workspace should not show ▣: %q", got)
+	}
+	// Marker appears once the window is open.
+	m.openPaths = map[string]bool{"/wt/live": true}
+	if got := m.renderRow(9, r); !strings.Contains(got, "▣") {
+		t.Errorf("open workspace should show ▣: %q", got)
+	}
+}
+
+func TestFooterHelpAdaptsToTmux(t *testing.T) {
+	m := readyModel(t)
+
+	m.inTmux = false
+	if f := m.footer(); !strings.Contains(f, "o open") || strings.Contains(f, "t term") {
+		t.Errorf("no-tmux footer = %q", f)
+	}
+
+	m.inTmux = true
+	if f := m.footer(); !strings.Contains(f, "t term") || !strings.Contains(f, "o edit") {
+		t.Errorf("tmux footer = %q", f)
+	}
+}
+
+func TestLedgerMsgStoresOpenPaths(t *testing.T) {
+	m := readyModel(t)
+	m, _ = step(m, ledgerMsg{projects: sampleLedger(), openPaths: map[string]bool{"/wt/x": true}})
+	if !m.openPaths["/wt/x"] {
+		t.Errorf("openPaths not stored: %v", m.openPaths)
+	}
+}

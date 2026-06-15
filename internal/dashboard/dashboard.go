@@ -16,6 +16,7 @@ import (
 
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/tmux"
 	"github.com/stack-bound/workflow/internal/workspace"
 )
 
@@ -62,10 +63,12 @@ type Model struct {
 	mgr    *workspace.Manager
 	global *config.Global
 	self   string // path to the wf binary, for suspend-and-run actions
+	inTmux bool   // tmux integration available (jump-to-window, open indicator)
 
-	rows   []row
-	cursor int
-	mode   mode
+	rows      []row
+	cursor    int
+	mode      mode
+	openPaths map[string]bool // worktree paths with a tmux window open right now
 
 	vp          viewport.Model
 	diffTitle   string
@@ -87,8 +90,9 @@ type Model struct {
 // --- messages ---
 
 type ledgerMsg struct {
-	projects []workspace.ProjectView
-	err      error
+	projects  []workspace.ProjectView
+	openPaths map[string]bool
+	err       error
 }
 
 type diffMsg struct {
@@ -119,6 +123,7 @@ func New(mgr *workspace.Manager, global *config.Global) Model {
 		mgr:    mgr,
 		global: global,
 		self:   self,
+		inTmux: tmux.Available(),
 		input:  ti,
 		status: "loading…",
 	}
@@ -143,9 +148,18 @@ func tickCmd() tea.Cmd {
 }
 
 func (m Model) refreshCmd() tea.Cmd {
+	inTmux := m.inTmux
 	return func() tea.Msg {
 		pv, err := m.mgr.Ledger()
-		return ledgerMsg{projects: pv, err: err}
+		msg := ledgerMsg{projects: pv, err: err}
+		// Derive the live "window open?" set alongside git status. Best-effort:
+		// a tmux query failure just leaves the indicators off.
+		if inTmux {
+			if open, oerr := tmux.OpenWorkspaces(); oerr == nil {
+				msg.openPaths = open
+			}
+		}
+		return msg
 	}
 }
 
@@ -177,6 +191,22 @@ func (m Model) runSelf(okMsg string, args ...string) tea.Cmd {
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return actionMsg{msg: okMsg, err: err, refresh: true}
 	})
+}
+
+// openWindowCmd jumps to the workspace's tmux window (creating it if needed).
+// Unlike the editor/add/merge actions it needs no suspend: select-window simply
+// shifts focus to a peer window, leaving the dashboard running in its own.
+func (m Model) openWindowCmd(project, branch string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := m.mgr.Path(branch, project)
+		if err != nil {
+			return actionMsg{err: err}
+		}
+		if err := launcher.NewTmux().Open(path, branch); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: "opened window for " + branch, refresh: true}
+	}
 }
 
 func (m Model) openEditorCmd(project, branch string) tea.Cmd {
@@ -220,6 +250,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setRows(msg.projects)
+		m.openPaths = msg.openPaths
 		if m.status == "loading…" {
 			m.status, m.statusErr = "", false
 		}
@@ -326,6 +357,14 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.openEditorCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
+		}
+	case "t":
+		if !m.inTmux {
+			m.status, m.statusErr = "tmux not detected (run wf inside tmux)", true
+			return m, nil
+		}
+		if r, ok := m.currentWorkspace(); ok {
+			return m, m.openWindowCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
 		}
 	case "c":
 		if r, ok := m.currentWorkspace(); ok {
