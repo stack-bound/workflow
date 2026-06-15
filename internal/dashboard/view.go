@@ -14,7 +14,7 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 	projectStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
 	activeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	doneStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	cleanStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 	errStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -24,6 +24,18 @@ var (
 	diffDelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	diffHunkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 	diffMetaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	dirtyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // the * uncommitted-changes marker
+	tmuxStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")) // the ▣ tmux-window-open indicator
+)
+
+// Column widths for a workspace row. ledgerHeader reuses them so the headings
+// line up with the marks and numbers underneath.
+const (
+	colBranch = 22
+	colState  = 7
+	colAB     = 12 // fits the "behind ahead" heading
+	colDiff   = 12
 )
 
 // bodyHeight is the number of rows available between the title and footer.
@@ -56,14 +68,48 @@ func (m Model) viewLedger() string {
 	if len(m.rows) == 0 {
 		b.WriteString(helpStyle.Render("No projects registered. Add one from the CLI: wf project add"))
 		b.WriteString("\n")
-	} else {
-		for i, r := range m.rows {
-			b.WriteString(m.renderRow(i, r))
+		return b.String() + m.footer()
+	}
+
+	for i, r := range m.rows {
+		b.WriteString(m.renderRow(i, r))
+		b.WriteString("\n")
+		// Label the columns under each non-empty project so the marks and
+		// numbers below have a heading to read them against.
+		if r.kind == rowProject && r.wsCount > 0 {
+			b.WriteString(ledgerHeader())
 			b.WriteString("\n")
 		}
 	}
 
+	b.WriteString("\n")
+	b.WriteString(ledgerLegend())
+
 	return b.String() + m.footer()
+}
+
+// ledgerHeader is the dim column-heading row drawn beneath each project. The six
+// leading spaces stand in for a workspace row's cursor (2) + tmux mark (2) +
+// status circle and its trailing space (2), so "branch" sits above the names.
+func ledgerHeader() string {
+	h := fmt.Sprintf("      %-*s %-*s %-*s %-*s %s",
+		colBranch, "branch", colState, "state", colAB, "behind|ahead", colDiff, "diff", "base")
+	return helpStyle.Render(h)
+}
+
+// ledgerLegend is the one-line key beneath the ledger explaining every glyph and
+// column, each sample drawn in the same colour it carries in the rows above.
+func ledgerLegend() string {
+	sep := helpStyle.Render("   ")
+	parts := []string{
+		activeStyle.Render("●") + helpStyle.Render(" active"),
+		cleanStyle.Render("○") + helpStyle.Render(" clean"),
+		tmuxStyle.Render("▣") + helpStyle.Render(" tmux open"),
+		helpStyle.Render("↓behind|↑ahead vs base"),
+		diffAddStyle.Render("+added") + helpStyle.Render(" ") + diffDelStyle.Render("-removed"),
+		dirtyStyle.Render("*") + helpStyle.Render(" uncommitted"),
+	}
+	return "  " + strings.Join(parts, sep)
 }
 
 func (m Model) renderRow(i int, r row) string {
@@ -73,9 +119,8 @@ func (m Model) renderRow(i int, r row) string {
 		prefix = "❯ "
 	}
 
-	var text string
 	if r.kind == rowProject {
-		text = fmt.Sprintf("%s (%d)  %s", r.project, r.wsCount, r.projectPath)
+		text := fmt.Sprintf("%s (%d)  %s", r.project, r.wsCount, r.projectPath)
 		if selected {
 			return prefix + selectedStyle.Render(text)
 		}
@@ -84,40 +129,105 @@ func (m Model) renderRow(i int, r row) string {
 
 	// A leading ▣ marks a workspace with a tmux window open right now (derived
 	// live each refresh); a plain indent keeps the columns aligned otherwise.
-	indent := "  "
-	if r.view != nil && m.openPaths[r.view.Worktree.Path] {
-		indent = "▣ "
-	}
-	text = indent + workspaceLine(r.view)
+	open := r.view != nil && m.openPaths[r.view.Worktree.Path]
+
+	// The selected row takes one highlight over the plain layout; every other
+	// row is accent-coloured field by field (workspaceStyled) so the green flags
+	// a status, not the whole line.
 	if selected {
-		return prefix + selectedStyle.Render(text)
+		indent := "  "
+		if open {
+			indent = "▣ "
+		}
+		return prefix + selectedStyle.Render(indent+workspaceLine(r.view))
 	}
-	switch {
-	case r.view.StatErr != nil:
-		return prefix + errStyle.Render(text)
-	case r.view.Active():
-		return prefix + activeStyle.Render(text)
-	default:
-		return prefix + doneStyle.Render(text)
+
+	indent := "  "
+	if open {
+		indent = tmuxStyle.Render("▣") + " "
 	}
+	return prefix + indent + workspaceStyled(r.view)
 }
 
-// workspaceLine formats a single workspace's status line (without styling).
+// wsState reports the status circle and word for a workspace, plus the colour
+// both carry: a filled ● "active" (green) when it holds work not yet in base
+// (dirty, ahead, or an open PR), or a hollow ○ "clean" (blue) when nothing is
+// outstanding. Both states get a colour so neither reads as the privileged one —
+// "clean" describes the git state, not that you are finished.
+func wsState(v *workspace.View) (mark, word string, style lipgloss.Style) {
+	if v.Active() {
+		return "●", "active", activeStyle
+	}
+	return "○", "clean", cleanStyle
+}
+
+// behindAhead renders the commit gap to base, behind first to match the column
+// heading: ↓ counts commits on base this branch lacks, ↑ commits it has on top.
+// The pipe ties the pair into one column under the "behind|ahead" heading.
+func behindAhead(v *workspace.View) string {
+	return fmt.Sprintf("↓%d|↑%d", v.Stat.Behind, v.Stat.Ahead)
+}
+
+// changesText is the plain "+added -removed" diff summary against base, with a
+// trailing * when the working tree has uncommitted changes.
+func changesText(v *workspace.View) string {
+	s := fmt.Sprintf("+%d -%d", v.Stat.Added, v.Stat.Deleted)
+	if v.Stat.Dirty {
+		s += " *"
+	}
+	return s
+}
+
+// workspaceLine formats a workspace status line WITHOUT accent colours. It is the
+// layout reference and the body of the selected row (which gets one highlight).
 func workspaceLine(v *workspace.View) string {
 	w := v.Worktree
 	if v.StatErr != nil {
-		return fmt.Sprintf("! %-22s %s", w.Branch, v.StatErr.Error())
+		return fmt.Sprintf("! %-*s %s", colBranch, w.Branch, v.StatErr.Error())
 	}
-	mark, state := "○", "done"
-	if v.Active() {
-		mark, state = "●", "active"
+	mark, word, _ := wsState(v)
+	return fmt.Sprintf("%s %-*s %-*s %-*s %-*s %s",
+		mark, colBranch, w.Branch, colState, word, colAB, behindAhead(v), colDiff, changesText(v), w.Base)
+}
+
+// workspaceStyled formats a workspace status line with accent colours only: the
+// branch name stays in the default foreground (it is the row's identity), the
+// status circle and word carry the active/clean colour, the diff counts are
+// green/red with a yellow * for uncommitted work, and the ahead/behind and base
+// columns are dimmed as secondary detail.
+func workspaceStyled(v *workspace.View) string {
+	w := v.Worktree
+	if v.StatErr != nil {
+		return errStyle.Render(fmt.Sprintf("! %-*s %s", colBranch, w.Branch, v.StatErr.Error()))
 	}
-	ab := fmt.Sprintf("↑%d ↓%d", v.Stat.Ahead, v.Stat.Behind)
-	changes := fmt.Sprintf("+%d -%d", v.Stat.Added, v.Stat.Deleted)
+	mark, word, style := wsState(v)
+	cols := []string{
+		style.Render(mark),
+		fmt.Sprintf("%-*s", colBranch, w.Branch),
+		style.Render(fmt.Sprintf("%-*s", colState, word)),
+		helpStyle.Render(fmt.Sprintf("%-*s", colAB, behindAhead(v))),
+		styledChanges(v),
+		helpStyle.Render(w.Base),
+	}
+	return strings.Join(cols, " ")
+}
+
+// styledChanges renders the diff column with semantic colour — green additions,
+// red deletions, a yellow * for uncommitted work — padded to colDiff so the base
+// column beyond it stays aligned.
+func styledChanges(v *workspace.View) string {
+	add := fmt.Sprintf("+%d", v.Stat.Added)
+	del := fmt.Sprintf("-%d", v.Stat.Deleted)
+	raw := add + " " + del
+	colored := diffAddStyle.Render(add) + " " + diffDelStyle.Render(del)
 	if v.Stat.Dirty {
-		changes += " *"
+		raw += " *"
+		colored += " " + dirtyStyle.Render("*")
 	}
-	return fmt.Sprintf("%s %-22s %-7s %-9s %-11s base:%s", mark, w.Branch, state, ab, changes, w.Base)
+	if pad := colDiff - lipgloss.Width(raw); pad > 0 {
+		colored += strings.Repeat(" ", pad)
+	}
+	return colored
 }
 
 func (m Model) viewDiff() string {
