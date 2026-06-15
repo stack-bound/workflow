@@ -2,6 +2,10 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.2.2] - 2026-06-15
+### Changed
+- Release workflow is now tag-driven: it triggers only on pushed version tags and no longer creates tags itself
+
 ## [0.2.1] - 2026-06-15
 ### Fixed
 - corrected the github location and repo name
