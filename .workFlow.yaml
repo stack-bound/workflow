@@ -1,7 +1,7 @@
 # .workFlow.yaml — per-repository WorkFlow settings.
 # All fields are optional.
 
-# Default base branch for new workspaces in this repo.
+# Default base branch for new workspaces in this repo (detected at init; edit freely).
 base: development
 
 # Where worktrees for this repo are created.
