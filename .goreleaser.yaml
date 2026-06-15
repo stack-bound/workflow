@@ -3,6 +3,11 @@ version: 2
 builds:
   - main: ./cmd/wf
     binary: wf
+    flags:
+      # Disable Go's VCS stamping so release binaries carry no commit metadata.
+      # version.go treats a stamped commit as a local "-dev" build; omitting it
+      # here makes Version() return the bare VERSION value for releases.
+      - -buildvcs=false
     env:
       - CGO_ENABLED=0
     ldflags:
