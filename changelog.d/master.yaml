@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - "Release workflow is now tag-driven: it triggers only on pushed version tags and no longer creates tags itself"
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - ""
+security:
+  - ""
+yanked:
+  - ""
