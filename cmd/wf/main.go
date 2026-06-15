@@ -3,7 +3,7 @@
 // future agents are layers over the same commands.
 package main
 
-import "github.com/mattnelsonuk/workflow/internal/cli"
+import "github.com/stack-bound/workflow/internal/cli"
 
 func main() {
 	cli.Execute()

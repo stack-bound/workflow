@@ -6,8 +6,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/mattnelsonuk/workflow/internal/launcher"
-	"github.com/mattnelsonuk/workflow/internal/workspace"
+	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

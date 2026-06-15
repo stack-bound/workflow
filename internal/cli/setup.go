@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/mattnelsonuk/workflow/internal/config"
-	"github.com/mattnelsonuk/workflow/internal/git"
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/git"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

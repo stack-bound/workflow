@@ -1,4 +1,4 @@
-module github.com/mattnelsonuk/workflow
+module github.com/stack-bound/workflow
 
 go 1.25.3
 

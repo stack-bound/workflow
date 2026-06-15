@@ -3,7 +3,7 @@ set -e
 
 # Installs the wf binary without sudo. By default it goes to ~/.local/bin and
 # that directory is added to your PATH if it isn't already.
-REPO="mattnelsonuk/workflow"
+REPO="stack-bound/workflow"
 BINARY="wf"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 

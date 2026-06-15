@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mattnelsonuk/workflow/internal/config"
-	"github.com/mattnelsonuk/workflow/internal/git"
-	"github.com/mattnelsonuk/workflow/internal/registry"
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/git"
+	"github.com/stack-bound/workflow/internal/registry"
 )
 
 // Manager is the workspace engine.

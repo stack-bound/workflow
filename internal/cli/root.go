@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mattnelsonuk/workflow"
-	"github.com/mattnelsonuk/workflow/internal/config"
-	"github.com/mattnelsonuk/workflow/internal/workspace"
+	"github.com/stack-bound/workflow"
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

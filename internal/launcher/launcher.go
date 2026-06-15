@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
-	"github.com/mattnelsonuk/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/config"
 )
 
 // Universal is the no-tmux launcher backend.

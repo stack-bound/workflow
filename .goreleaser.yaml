@@ -26,5 +26,5 @@ checksum:
 
 release:
   github:
-    owner: mattnelsonuk
+    owner: stack-bound
     name: workflow
