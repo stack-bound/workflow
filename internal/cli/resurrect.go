@@ -19,7 +19,7 @@ func newResurrectCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "resurrect",
 		Aliases: []string{"restore"},
-		Short:   "Recreate tmux windows for tracked workspaces (after a tmux/computer restart)",
+		Short:   "Open a tmux window for every tracked workspace (after a tmux/computer restart)",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !tmux.Available() {
