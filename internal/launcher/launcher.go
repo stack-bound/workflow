@@ -41,18 +41,25 @@ func (u *Universal) CopyPath(path string) error {
 	return nil
 }
 
-// OpenInEditor opens path in the resolved editor.
-func (u *Universal) OpenInEditor(path string) error {
+// EditorCommand builds (without running) the command to open path in the
+// resolved editor. The CLI runs it directly; the TUI runs it via
+// tea.ExecProcess so a terminal editor can take over the screen cleanly.
+func (u *Universal) EditorCommand(path string) *exec.Cmd {
 	editor := u.cfg.ResolveEditor()
 	// Support editors configured with arguments, e.g. "code -n".
 	parts := strings.Fields(editor)
 	args := append(parts[1:], path)
-	c := exec.Command(parts[0], args...)
+	return exec.Command(parts[0], args...)
+}
+
+// OpenInEditor opens path in the resolved editor.
+func (u *Universal) OpenInEditor(path string) error {
+	c := u.EditorCommand(path)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("open editor %q: %w", editor, err)
+		return fmt.Errorf("open editor %q: %w", u.cfg.ResolveEditor(), err)
 	}
 	return nil
 }

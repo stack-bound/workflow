@@ -108,6 +108,24 @@ func (m *Manager) Add(opts AddOptions) (*registry.Worktree, error) {
 	return &wt, nil
 }
 
+// ProjectView groups a registered project with its workspace views. It is the
+// shape the dashboard's project → worktree tree renders.
+type ProjectView struct {
+	Project    registry.Project
+	Workspaces []View
+}
+
+// viewFor joins a worktree with its live git status.
+func viewFor(w registry.Worktree) View {
+	v := View{Worktree: w}
+	if _, err := os.Stat(w.Path); err == nil {
+		v.Stat, v.StatErr = git.Stats(w.Path, w.Base)
+	} else {
+		v.StatErr = fmt.Errorf("worktree path missing")
+	}
+	return v
+}
+
 // List returns every registered workspace joined with live git status.
 func (m *Manager) List() ([]View, error) {
 	store, err := registry.Load(m.registryPath)
@@ -116,15 +134,36 @@ func (m *Manager) List() ([]View, error) {
 	}
 	views := make([]View, 0, len(store.Worktrees))
 	for _, w := range store.Worktrees {
-		v := View{Worktree: w}
-		if _, err := os.Stat(w.Path); err == nil {
-			v.Stat, v.StatErr = git.Stats(w.Path, w.Base)
-		} else {
-			v.StatErr = fmt.Errorf("worktree path missing")
-		}
-		views = append(views, v)
+		views = append(views, viewFor(w))
 	}
 	return views, nil
+}
+
+// Ledger returns every registered project with its workspaces (live status),
+// including projects that currently have no workspaces.
+func (m *Manager) Ledger() ([]ProjectView, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ProjectView, 0, len(store.Projects))
+	for _, p := range store.Projects {
+		pv := ProjectView{Project: p}
+		for _, w := range store.WorktreesForProject(p.Name) {
+			pv.Workspaces = append(pv.Workspaces, viewFor(w))
+		}
+		out = append(out, pv)
+	}
+	return out, nil
+}
+
+// Diff returns the cumulative diff of a workspace against its base branch.
+func (m *Manager) Diff(ref, projectFlag string) (string, error) {
+	wt, err := m.Resolve(ref, projectFlag)
+	if err != nil {
+		return "", err
+	}
+	return git.Diff(wt.Path, wt.Base)
 }
 
 // Path resolves a workspace reference to its filesystem path.

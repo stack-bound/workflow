@@ -15,7 +15,7 @@
 | Milestone | Status | Started | Completed |
 |---|---|---|---|
 | M1 — Engine: worktrees + registry + git (CLI) | ✅ Done | 2026-06-15 | 2026-06-15 |
-| M2 — Dashboard TUI + review | ⬜ Not started | — | — |
+| M2 — Dashboard TUI + review | ✅ Done | 2026-06-15 | 2026-06-15 |
 | M3 — tmux integration + sidebar | ⬜ Not started | — | — |
 | M4 — GitHub: branches, PRs, merge | ⬜ Not started | — | — |
 | Stage 2 — Docker isolation | ⬜ Not started | — | — |
@@ -39,10 +39,10 @@
 ## M2 — Dashboard TUI + review
 **Goal:** run the app → cross-project ledger; review diffs; merge. Works without tmux.
 
-- [ ] `internal/dashboard` — Bubble Tea ledger: projects → worktrees tree, live git stats, active/done flag, refresh
-- [ ] Diff viewer (scrollable, colorized)
-- [ ] Dashboard actions wired to the engine: add, open (universal), copy-path, open-in-editor, merge, rm
-- [ ] **M2 verification** (see build-plan.md → M2)
+- [x] `internal/dashboard` — Bubble Tea ledger: projects → worktrees tree, live git stats, active/done flag, refresh (manual `r` + auto every 4s while idle; selection preserved across refresh)
+- [x] Diff viewer (scrollable, colorized; cumulative diff vs base + untracked-file list)
+- [x] Dashboard actions wired to the engine: add, open-in-editor, copy-path, merge, rm (open universal; tmux jump arrives in M3)
+- [x] **M2 verification** (see build-plan.md → M2)
 
 ## M3 — tmux integration (optional adapter) + sidebar
 **Goal:** the full cockpit for tmux users, native navigation preserved. Guest, never owner.
@@ -95,6 +95,7 @@ _Record any deviation from `build-plan.md` here, with date and reason._
 - **2026-06-14** — **Full redesign.** Replaced the browser/Docker/daemon-first plan with a **CLI-first, tmux-native (optional), Go TUI** design: tool is a *guest* in tmux (never owns it), dashboard ledger + live sidebar, persist-worktrees/derive-the-rest, B-scoping (flat session, window-per-workspace), Docker → Stage 2, AI → Stage 3, daemon deferred to the automation layer. Reason: a design interview + throwaway spike showed the owned-cockpit model fought native tmux; the guest/CLI model is simpler, composable, and team-friendly (works without tmux).
 
 ## Changelog
+- **2026-06-15** — **M2 landed.** Built the Bubble Tea dashboard (`internal/dashboard`) — the default surface when running `wf` on a TTY (`wf` piped still prints the plain list; `wf dashboard`/`dash`/`ui` forces it). Cross-project ledger: projects → worktrees tree with live git stats and an active/done flag, manual (`r`) + auto-refresh (4s while idle on the ledger), selection preserved across refresh. Scrollable, colorized diff viewer (`enter`/`d`) showing the cumulative diff vs base plus an untracked-file list. Actions wired straight to the engine: add (`a`, inline branch prompt), open-in-editor (`o`), copy-path (`c`), merge (`m`) and rm (`x`), both behind a y/n confirm. Engine additions: `Manager.Ledger()` (projects grouped with workspaces, incl. empty projects), `Manager.Diff()`, `git.Diff()`, `launcher.EditorCommand()`. Operations that stream git/setup output (add/merge/rm) and the editor run via `tea.ExecProcess` (suspend → run → resume) so output and terminal editors display cleanly. **`merge` is now non-interactive** — a default `Merge branch 'X' into base` message is supplied, so the dashboard never has to host the merge-message editor (also smooths the CLI). Verified end-to-end in an isolated sandbox: ledger across 2 projects, active/done + stats, diff scroll, merge → ledger updates + branch/worktree cleaned, add → new workspace, persistence across a restart, and the no-tmux list fallback. TUI smoke-tested through a PTY on a **dedicated tmux server** (`-L`), never the default one (see CLAUDE.md). New tests: `dashboard` model logic (row flattening, selection preservation, cursor clamp, diff colorize) and a `workspace` Ledger/Diff integration test.
 - **2026-06-15** — **M1 landed.** Built the scriptable engine from the empty repo: `cmd/wf` (cobra), `internal/{config,registry,git,launcher,workspace,cli}`. Commands: `project add/ls/rm`, `add`, `list`/`ls` (+`--json`), `path`, `open`, `copy`, `merge`, `rm`, `init`, `config`, `completions` (generate + install for bash/zsh/fish/powershell, replacing cobra's default `completion` command while keeping the hidden `__complete` runtime intact). Registry is atomic JSON + `flock`; git stats (dirty / ahead-behind / ±lines vs base) derived live; universal launcher (path/clipboard/editor); per-repo `.workFlow.yaml` (base, setup, copy, symlink). Unit tests for registry + slug/active logic; full M1 end-to-end verification passed in an isolated `XDG_CONFIG_HOME` sandbox (register → add ×2 → stats → dirty-merge refusal → clean merge → rm → empty). One design refinement: `merge` now refuses up front when the workspace is dirty, so it is all-or-nothing rather than merging history and then failing to remove a dirty worktree. Note: in M1 a brand-new, clean workspace shows as `done` (no commits, not dirty) — the "live terminal/agent keeps it active" dimension arrives with M3/Stage 3.
 - **2026-06-13** — Original build plan (browser/Docker/daemon-first) authored. No code.
 - **2026-06-14** — Redesigned after a design interview and a throwaway `spike/` prototype (proved: real tmux > embedded terminal; guest > owner). Build plan + progress rewritten for the new architecture. Prototype `spike/` is disposable — the plan is written to build fresh from an empty repo.

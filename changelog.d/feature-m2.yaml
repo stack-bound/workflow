@@ -1,0 +1,19 @@
+deployment:
+  - ""
+added:
+  - "Interactive dashboard TUI: a cross-project ledger of projects and their worktree workspaces with live git status (ahead/behind, ±lines, dirty) and an active/done flag, plus manual and automatic refresh"
+  - "Dashboard diff viewer: review a workspace's scrollable, colorized diff against its base branch"
+  - "Dashboard actions wired to the engine: create a workspace, open it in your editor, copy its path, merge it, and remove it"
+changed:
+  - "Running `wf` with no arguments now opens the dashboard in an interactive terminal, and still prints the plain workspace list when piped or redirected"
+  - "`wf merge` now uses a default merge commit message instead of opening an editor, so merges complete non-interactively"
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - ""
+security:
+  - ""
+yanked:
+  - ""

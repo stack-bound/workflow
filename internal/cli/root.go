@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow"
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 // Execute runs the root command. It is the single entrypoint from main.
@@ -28,8 +28,13 @@ func newRootCmd() *cobra.Command {
 		Version:       workflow.Version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		// No subcommand: show the ledger (the dashboard arrives in M2).
+		// No subcommand: open the dashboard interactively, but fall back to the
+		// plain list when stdout is not a TTY (e.g. `wf | cat`) so it stays
+		// scriptable.
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if stdoutIsTTY() {
+				return runDashboard()
+			}
 			return runList(cmd, false)
 		},
 	}
@@ -40,6 +45,7 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(
 		newProjectCmd(),
+		newDashboardCmd(),
 		newAddCmd(),
 		newListCmd(),
 		newPathCmd(),

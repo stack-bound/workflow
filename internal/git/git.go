@@ -115,12 +115,15 @@ func WorktreeRemove(repo, path string, force bool) error {
 }
 
 // Merge checks out base in repo and merges branch into it (no fast-forward so
-// the workspace's history is preserved as a unit).
+// the workspace's history is preserved as a unit). A default merge message is
+// supplied so the merge is non-interactive — important for the dashboard,
+// which cannot host the merge-message editor mid-flow.
 func Merge(repo, base, branch string) error {
 	if err := runIO("", "-C", repo, "checkout", base); err != nil {
 		return err
 	}
-	return runIO("", "-C", repo, "merge", "--no-ff", branch)
+	msg := fmt.Sprintf("Merge branch '%s' into %s", branch, base)
+	return runIO("", "-C", repo, "merge", "--no-ff", "-m", msg, branch)
 }
 
 // DeleteBranch deletes a local branch. force uses -D (unmerged-safe).
@@ -130,6 +133,32 @@ func DeleteBranch(repo, branch string, force bool) error {
 		flag = "-D"
 	}
 	return runIO("", "-C", repo, "branch", flag, branch)
+}
+
+// Diff returns the cumulative diff of a worktree against base: everything on
+// the branch plus uncommitted tracked edits. Untracked files are listed
+// separately at the end since `git diff` does not include them.
+func Diff(dir, base string) (string, error) {
+	diff, err := run(dir, "diff", base)
+	if err != nil {
+		return "", err
+	}
+	untracked, err := run(dir, "ls-files", "--others", "--exclude-standard")
+	if err == nil && untracked != "" {
+		var b strings.Builder
+		b.WriteString(diff)
+		if diff != "" {
+			b.WriteString("\n")
+		}
+		b.WriteString("# Untracked files (not in the diff):\n")
+		for _, f := range strings.Split(untracked, "\n") {
+			if f != "" {
+				b.WriteString("#   " + f + "\n")
+			}
+		}
+		return b.String(), nil
+	}
+	return diff, nil
 }
 
 // Stats derives the live status of a worktree against base.

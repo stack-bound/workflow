@@ -1,0 +1,487 @@
+// Package dashboard is WorkFlow's Bubble Tea TUI: the cross-project ledger
+// (projects → worktrees with live git status and an active/done flag), a
+// scrollable diff viewer, and actions wired straight to the engine. It works
+// in any terminal; the tmux power-ups arrive in M3.
+package dashboard
+
+import (
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/workspace"
+)
+
+// refreshInterval is how often the ledger re-derives live git status while the
+// user is on the ledger view.
+const refreshInterval = 4 * time.Second
+
+// mode is the active interaction surface.
+type mode int
+
+const (
+	modeLedger mode = iota
+	modeDiff
+	modeInput
+	modeConfirm
+)
+
+// rowKind distinguishes a project header from a workspace line.
+type rowKind int
+
+const (
+	rowProject rowKind = iota
+	rowWorkspace
+)
+
+// row is one rendered line in the ledger: a project header or a workspace.
+type row struct {
+	kind        rowKind
+	project     string
+	projectPath string
+	wsCount     int
+	view        *workspace.View
+}
+
+// confirm holds a pending destructive action awaiting y/n.
+type confirm struct {
+	action  string // "merge" | "rm"
+	project string
+	branch  string
+}
+
+// Model is the dashboard state.
+type Model struct {
+	mgr    *workspace.Manager
+	global *config.Global
+	self   string // path to the wf binary, for suspend-and-run actions
+
+	rows   []row
+	cursor int
+	mode   mode
+
+	vp          viewport.Model
+	diffTitle   string
+	diffProject string
+	diffBranch  string
+
+	input      textinput.Model
+	addProject string
+
+	confirm confirm
+
+	status    string
+	statusErr bool
+
+	width, height int
+	ready         bool
+}
+
+// --- messages ---
+
+type ledgerMsg struct {
+	projects []workspace.ProjectView
+	err      error
+}
+
+type diffMsg struct {
+	title   string
+	content string
+	err     error
+}
+
+type actionMsg struct {
+	msg     string
+	err     error
+	refresh bool
+}
+
+type tickMsg time.Time
+
+// New builds a dashboard model over the given engine and config.
+func New(mgr *workspace.Manager, global *config.Global) Model {
+	self, err := os.Executable()
+	if err != nil || self == "" {
+		self = "wf" // fall back to PATH lookup
+	}
+	ti := textinput.New()
+	ti.Placeholder = "branch name"
+	ti.CharLimit = 100
+	ti.Prompt = "branch: "
+	return Model{
+		mgr:    mgr,
+		global: global,
+		self:   self,
+		input:  ti,
+		status: "loading…",
+	}
+}
+
+// Run starts the dashboard program.
+func Run(mgr *workspace.Manager, global *config.Global) error {
+	p := tea.NewProgram(New(mgr, global), tea.WithAltScreen())
+	_, err := p.Run()
+	return err
+}
+
+// Init kicks off the first refresh and the auto-refresh tick.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.refreshCmd(), tickCmd())
+}
+
+// --- commands ---
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func (m Model) refreshCmd() tea.Cmd {
+	return func() tea.Msg {
+		pv, err := m.mgr.Ledger()
+		return ledgerMsg{projects: pv, err: err}
+	}
+}
+
+func (m Model) diffCmd(project, branch string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := m.mgr.Diff(branch, project)
+		return diffMsg{title: project + "/" + branch, content: content, err: err}
+	}
+}
+
+func (m Model) copyCmd(project, branch string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := m.mgr.Path(branch, project)
+		if err != nil {
+			return actionMsg{err: err}
+		}
+		if err := launcher.NewUniversal(m.global).CopyPath(path); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: "copied path for " + branch}
+	}
+}
+
+// runSelf suspends the TUI and re-invokes the wf binary so engine operations
+// that stream git/setup output to the terminal (add, merge, rm) display
+// cleanly, then refreshes the ledger.
+func (m Model) runSelf(okMsg string, args ...string) tea.Cmd {
+	cmd := exec.Command(m.self, args...)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return actionMsg{msg: okMsg, err: err, refresh: true}
+	})
+}
+
+func (m Model) openEditorCmd(project, branch string) tea.Cmd {
+	path, err := m.mgr.Path(branch, project)
+	if err != nil {
+		return func() tea.Msg { return actionMsg{err: err} }
+	}
+	cmd := launcher.NewUniversal(m.global).EditorCommand(path)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return actionMsg{msg: "opened " + branch + " in editor", err: err, refresh: true}
+	})
+}
+
+// --- update ---
+
+// Update is the Bubble Tea event loop.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.input.Width = msg.Width - 12
+		bodyH := m.bodyHeight()
+		if !m.ready {
+			m.vp = viewport.New(msg.Width, bodyH)
+			m.ready = true
+		} else {
+			m.vp.Width, m.vp.Height = msg.Width, bodyH
+		}
+		return m, nil
+
+	case tickMsg:
+		// Re-derive live status only while idle on the ledger.
+		if m.mode == modeLedger {
+			return m, tea.Batch(m.refreshCmd(), tickCmd())
+		}
+		return m, tickCmd()
+
+	case ledgerMsg:
+		if msg.err != nil {
+			m.status, m.statusErr = msg.err.Error(), true
+			return m, nil
+		}
+		m.setRows(msg.projects)
+		if m.status == "loading…" {
+			m.status, m.statusErr = "", false
+		}
+		return m, nil
+
+	case diffMsg:
+		if msg.err != nil {
+			m.status, m.statusErr = msg.err.Error(), true
+			m.mode = modeLedger
+			return m, nil
+		}
+		m.diffTitle = msg.title
+		content := msg.content
+		if content == "" {
+			content = "(no changes against base)"
+		}
+		m.vp.SetContent(colorizeDiff(content))
+		m.vp.GotoTop()
+		m.mode = modeDiff
+		return m, nil
+
+	case actionMsg:
+		if msg.err != nil {
+			m.status, m.statusErr = "failed: "+msg.err.Error(), true
+		} else if msg.msg != "" {
+			m.status, m.statusErr = msg.msg, false
+		}
+		if msg.refresh {
+			return m, m.refreshCmd()
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	}
+
+	// Forward anything else to the active sub-component.
+	if m.mode == modeDiff {
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+	}
+	if m.mode == modeInput {
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.Type == tea.KeyCtrlC {
+		return m, tea.Quit
+	}
+	switch m.mode {
+	case modeInput:
+		return m.handleInputKey(msg)
+	case modeConfirm:
+		return m.handleConfirmKey(msg)
+	case modeDiff:
+		return m.handleDiffKey(msg)
+	default:
+		return m.handleLedgerKey(msg)
+	}
+}
+
+func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q":
+		return m, tea.Quit
+	case "up", "k":
+		m.moveCursor(-1)
+	case "down", "j":
+		m.moveCursor(1)
+	case "g", "home":
+		m.cursor = 0
+	case "G", "end":
+		m.cursor = len(m.rows) - 1
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+	case "r":
+		m.status, m.statusErr = "refreshing…", false
+		return m, m.refreshCmd()
+	case "enter", "d":
+		if r, ok := m.currentWorkspace(); ok {
+			m.diffProject = r.view.Worktree.Project
+			m.diffBranch = r.view.Worktree.Branch
+			return m, m.diffCmd(m.diffProject, m.diffBranch)
+		}
+		m.status, m.statusErr = "select a workspace to view its diff", true
+	case "a":
+		proj := m.currentProject()
+		if proj == "" {
+			m.status, m.statusErr = "no project to add a workspace to (register one: wf project add)", true
+			return m, nil
+		}
+		m.addProject = proj
+		m.mode = modeInput
+		m.input.SetValue("")
+		m.input.Focus()
+		m.status, m.statusErr = "new workspace in "+proj, false
+		return m, textinput.Blink
+	case "o":
+		if r, ok := m.currentWorkspace(); ok {
+			return m, m.openEditorCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
+		}
+	case "c":
+		if r, ok := m.currentWorkspace(); ok {
+			return m, m.copyCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
+		}
+	case "m":
+		if r, ok := m.currentWorkspace(); ok {
+			m.confirm = confirm{action: "merge", project: r.view.Worktree.Project, branch: r.view.Worktree.Branch}
+			m.mode = modeConfirm
+		}
+	case "x":
+		if r, ok := m.currentWorkspace(); ok {
+			m.confirm = confirm{action: "rm", project: r.view.Worktree.Project, branch: r.view.Worktree.Branch}
+			m.mode = modeConfirm
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleDiffKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc":
+		m.mode = modeLedger
+		return m, nil
+	case "r":
+		return m, m.diffCmd(m.diffProject, m.diffBranch)
+	}
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		branch := strings.TrimSpace(m.input.Value())
+		m.mode = modeLedger
+		m.input.Blur()
+		if branch == "" {
+			m.status, m.statusErr = "add cancelled (empty branch)", true
+			return m, nil
+		}
+		m.status, m.statusErr = "creating "+branch+"…", false
+		return m, m.runSelf("created "+branch, "add", branch, "--project", m.addProject)
+	case tea.KeyEsc:
+		m.mode = modeLedger
+		m.input.Blur()
+		m.status, m.statusErr = "add cancelled", false
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		c := m.confirm
+		m.mode = modeLedger
+		switch c.action {
+		case "merge":
+			m.status, m.statusErr = "merging "+c.branch+"…", false
+			return m, m.runSelf("merged "+c.branch, "merge", c.branch, "--project", c.project)
+		case "rm":
+			m.status, m.statusErr = "removing "+c.branch+"…", false
+			return m, m.runSelf("removed "+c.branch, "rm", c.branch, "--project", c.project, "--force")
+		}
+	case "n", "N", "esc", "q":
+		m.mode = modeLedger
+		m.status, m.statusErr = "cancelled", false
+	}
+	return m, nil
+}
+
+// --- row/cursor helpers ---
+
+// setRows rebuilds the flattened ledger, preserving the selection where it can.
+func (m *Model) setRows(projects []workspace.ProjectView) {
+	prevKey := m.selectionKey()
+	var rows []row
+	for i := range projects {
+		pv := projects[i]
+		rows = append(rows, row{
+			kind:        rowProject,
+			project:     pv.Project.Name,
+			projectPath: pv.Project.Path,
+			wsCount:     len(pv.Workspaces),
+		})
+		for j := range pv.Workspaces {
+			v := &pv.Workspaces[j]
+			rows = append(rows, row{kind: rowWorkspace, project: pv.Project.Name, view: v})
+		}
+	}
+	m.rows = rows
+	// Restore the cursor onto the same row when possible.
+	if prevKey != "" {
+		for i, r := range rows {
+			if rowKey(r) == prevKey {
+				m.cursor = i
+				break
+			}
+		}
+	}
+	if m.cursor >= len(rows) {
+		m.cursor = len(rows) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+}
+
+func (m *Model) moveCursor(delta int) {
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.rows) {
+		m.cursor = len(m.rows) - 1
+	}
+}
+
+func (m Model) current() (row, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.rows) {
+		return row{}, false
+	}
+	return m.rows[m.cursor], true
+}
+
+// currentWorkspace returns the selected row when it is a workspace.
+func (m Model) currentWorkspace() (row, bool) {
+	r, ok := m.current()
+	if ok && r.kind == rowWorkspace && r.view != nil {
+		return r, true
+	}
+	return row{}, false
+}
+
+// currentProject is the project of the selected row (header or workspace).
+func (m Model) currentProject() string {
+	if r, ok := m.current(); ok {
+		return r.project
+	}
+	return ""
+}
+
+func (m Model) selectionKey() string {
+	if r, ok := m.current(); ok {
+		return rowKey(r)
+	}
+	return ""
+}
+
+func rowKey(r row) string {
+	if r.kind == rowWorkspace && r.view != nil {
+		return "w\x00" + r.view.Worktree.Project + "\x00" + r.view.Worktree.Branch
+	}
+	return "p\x00" + r.project
+}
