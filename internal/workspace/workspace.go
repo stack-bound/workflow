@@ -92,6 +92,16 @@ func (m *Manager) Add(opts AddOptions) (*registry.Worktree, error) {
 	}
 
 	newBranch := !git.BranchExists(proj.Path, opts.Branch)
+	// When starting a new branch, the base is git's start-point. Vet it first so
+	// a stale/renamed default surfaces as a clear, actionable message instead of
+	// git's raw "fatal: invalid reference: <base>".
+	if newBranch && !git.RefExists(proj.Path, base) {
+		avail := ""
+		if branches, err := git.LocalBranches(proj.Path); err == nil && len(branches) > 0 {
+			avail = " (available: " + strings.Join(branches, ", ") + ")"
+		}
+		return nil, fmt.Errorf("base branch %q does not exist in project %q%s; set 'base:' in .workFlow.yaml or pass --base=<branch>", base, proj.Name, avail)
+	}
 	if err := git.WorktreeAdd(proj.Path, path, opts.Branch, base, newBranch); err != nil {
 		return nil, err
 	}
@@ -341,6 +351,11 @@ func (m *Manager) resolveBase(flag string, repoCfg *config.Repo, repoPath string
 		return m.global.DefaultBase
 	}
 	if b, err := git.DefaultBranch(repoPath); err == nil {
+		return b
+	}
+	// Last resort: prefer whatever is checked out over a literal "main", which
+	// may not exist in this repo.
+	if b, err := git.CurrentBranch(repoPath); err == nil && b != "" {
 		return b
 	}
 	return "main"

@@ -93,6 +93,65 @@ func TestBranchExistsAndDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestRefExists(t *testing.T) {
+	repo := newRepo(t)
+	gitCmd(t, repo, "tag", "v1")
+
+	if !RefExists(repo, "main") {
+		t.Error("RefExists(main) = false, want true")
+	}
+	if !RefExists(repo, "v1") {
+		t.Error("RefExists(v1 tag) = false, want true")
+	}
+	if RefExists(repo, "nope") {
+		t.Error("RefExists(nope) = true, want false")
+	}
+}
+
+func TestLocalBranches(t *testing.T) {
+	repo := newRepo(t)
+	gitCmd(t, repo, "branch", "development")
+	gitCmd(t, repo, "branch", "feature/x")
+
+	got, err := LocalBranches(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"main": true, "development": true, "feature/x": true}
+	if len(got) != len(want) {
+		t.Fatalf("LocalBranches = %v, want keys %v", got, want)
+	}
+	for _, b := range got {
+		if !want[b] {
+			t.Errorf("unexpected branch %q in %v", b, got)
+		}
+	}
+}
+
+func TestOriginHEAD(t *testing.T) {
+	repo := newRepo(t)
+	// No remote yet: origin/HEAD is unset, so OriginHEAD must error and
+	// DefaultBranch must still resolve via the local-branch fallback.
+	if _, err := OriginHEAD(repo); err == nil {
+		t.Error("OriginHEAD on a remoteless repo = nil error, want error")
+	}
+
+	// Create a bare "origin" with master as its default and point origin/HEAD at it.
+	origin := t.TempDir()
+	gitCmd(t, origin, "init", "--bare", "-b", "master")
+	gitCmd(t, repo, "remote", "add", "origin", origin)
+	gitCmd(t, repo, "push", "origin", "main:master")
+	gitCmd(t, repo, "remote", "set-head", "origin", "master")
+
+	got, err := OriginHEAD(repo)
+	if err != nil {
+		t.Fatalf("OriginHEAD: %v", err)
+	}
+	if got != "master" {
+		t.Errorf("OriginHEAD = %q, want master", got)
+	}
+}
+
 func TestWorktreeAddAndRemove(t *testing.T) {
 	repo := newRepo(t)
 	wt := filepath.Join(t.TempDir(), "feat")

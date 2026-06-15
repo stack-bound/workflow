@@ -154,13 +154,14 @@ func (g *Global) ResolveEditor() string {
 	return "vi"
 }
 
-// ExampleRepoYAML returns a documented example .workFlow.yaml.
-func ExampleRepoYAML() string {
-	return `# .workFlow.yaml — per-repository WorkFlow settings.
+// ExampleRepoYAML returns a documented example .workFlow.yaml with base as the
+// default base branch (detected at init time; the user can edit it later).
+func ExampleRepoYAML(base string) string {
+	return fmt.Sprintf(`# .workFlow.yaml — per-repository WorkFlow settings.
 # All fields are optional.
 
-# Default base branch for new workspaces in this repo.
-base: main
+# Default base branch for new workspaces in this repo (detected at init; edit freely).
+base: %s
 
 # Where worktrees for this repo are created.
 # Default: a sibling directory "<repo>_worktrees".
@@ -177,5 +178,5 @@ copy:
 # Repo-root-relative files symlinked into each new worktree.
 symlink:
   # - .env
-`
+`, base)
 }

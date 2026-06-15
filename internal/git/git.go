@@ -71,11 +71,44 @@ func BranchExists(repo, branch string) bool {
 	return err == nil
 }
 
+// RefExists reports whether ref resolves to a commit in repo. Unlike
+// BranchExists it accepts any commit-ish (local branch, tag, remote-tracking
+// ref, or SHA) — the same thing `git worktree add` accepts as a base — so it
+// can vet a base ref before we shell out and let git fail with a raw message.
+func RefExists(repo, ref string) bool {
+	_, err := run(repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
+// OriginHEAD returns the branch origin/HEAD points at (the remote's default
+// branch) without the "origin/" prefix. It errors when origin/HEAD is unset,
+// which lets callers tell an explicitly-tracked default from a guessed one.
+func OriginHEAD(repo string) (string, error) {
+	out, err := run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(out, "origin/"), nil
+}
+
+// LocalBranches lists the repo's local branch names. It returns an empty slice
+// for a repo with no branches (e.g. before the first commit).
+func LocalBranches(repo string) ([]string, error) {
+	out, err := run(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // DefaultBranch detects the repo's default branch (origin/HEAD, then main,
 // then master), falling back to the currently checked-out branch.
 func DefaultBranch(repo string) (string, error) {
-	if out, err := run(repo, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		return strings.TrimPrefix(out, "origin/"), nil
+	if b, err := OriginHEAD(repo); err == nil {
+		return b, nil
 	}
 	for _, cand := range []string{"main", "master"} {
 		if BranchExists(repo, cand) {

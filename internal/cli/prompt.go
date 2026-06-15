@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mattn/go-isatty"
@@ -44,6 +45,46 @@ func promptYesNo(w io.Writer, r io.Reader, question string, def bool) (bool, err
 	default:
 		return false, nil
 	}
+}
+
+// promptBranch asks the user to choose a base branch. candidates are shown as a
+// numbered list with def pre-selected (def should appear in candidates). Empty
+// input returns def; an in-range number selects that candidate; any other text
+// is returned verbatim as a branch name so a not-yet-created base can be named.
+// EOF (a closed stdin) returns def.
+func promptBranch(w io.Writer, r io.Reader, candidates []string, def string) (string, error) {
+	if _, err := fmt.Fprintln(w, "Default base branch for new worktrees:"); err != nil {
+		return "", err
+	}
+	for i, c := range candidates {
+		marker := ""
+		if c == def {
+			marker = "  (default)"
+		}
+		if _, err := fmt.Fprintf(w, "  %d) %s%s\n", i+1, c, marker); err != nil {
+			return "", err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "Enter a number or branch name [%s]: ", def); err != nil {
+		return "", err
+	}
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	choice := strings.TrimSpace(line)
+	if choice == "" {
+		return def, nil
+	}
+	if n, err := strconv.Atoi(choice); err == nil {
+		if n >= 1 && n <= len(candidates) {
+			return candidates[n-1], nil
+		}
+		// Out-of-range number: keep the default rather than inventing a branch
+		// literally named e.g. "9".
+		return def, nil
+	}
+	return choice, nil
 }
 
 // registerOutcome reports what promptRegister did.

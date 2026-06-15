@@ -173,10 +173,10 @@ func TestResolveEditor(t *testing.T) {
 
 func TestExampleRepoYAMLIsValid(t *testing.T) {
 	var r Repo
-	if err := yaml.Unmarshal([]byte(ExampleRepoYAML()), &r); err != nil {
+	if err := yaml.Unmarshal([]byte(ExampleRepoYAML("development")), &r); err != nil {
 		t.Fatalf("example YAML does not parse: %v", err)
 	}
-	if r.Base != "main" {
-		t.Errorf("example base = %q, want main", r.Base)
+	if r.Base != "development" {
+		t.Errorf("example base = %q, want development", r.Base)
 	}
 }

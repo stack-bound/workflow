@@ -94,6 +94,34 @@ func TestAddErrors(t *testing.T) {
 	}
 }
 
+func TestAddRejectsMissingBase(t *testing.T) {
+	repo := newRepo(t) // a repo on "main"
+	m, proj := register(t, repo)
+
+	_, err := m.Add(AddOptions{Branch: "feat", Project: proj, NoSetup: true, Base: "ghost-base"})
+	if err == nil {
+		t.Fatal("expected an error when the base branch does not exist")
+	}
+	// The message must name the missing base and offer a way forward, not leak
+	// git's raw "fatal: invalid reference".
+	for _, want := range []string{"ghost-base", "does not exist", "available", "main"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should contain %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "invalid reference") {
+		t.Errorf("should not surface git's raw error; got: %v", err)
+	}
+	// Nothing should have been created or registered.
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(store.FindWorktrees("feat", proj)); n != 0 {
+		t.Errorf("failed base check must not register a worktree; got %d", n)
+	}
+}
+
 func TestPathAndListAndResolve(t *testing.T) {
 	repo := newRepo(t)
 	m, proj := register(t, repo)
