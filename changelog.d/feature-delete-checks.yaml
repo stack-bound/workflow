@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - "Dashboard: the `x` (remove) confirmation now checks the workspace first — it warns in red and spells out what would be lost (uncommitted changes and/or unmerged commits) when there is work at risk, and reassures in green that the branch is safe to drop when there isn't"
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - ""
+security:
+  - ""
+yanked:
+  - ""

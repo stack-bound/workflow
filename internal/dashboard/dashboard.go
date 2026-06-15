@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/git"
 	"github.com/stack-bound/workflow/internal/launcher"
 	"github.com/stack-bound/workflow/internal/tmux"
 	"github.com/stack-bound/workflow/internal/workspace"
@@ -56,6 +57,27 @@ type confirm struct {
 	action  string // "merge" | "rm"
 	project string
 	branch  string
+
+	// base and the live status snapshot let the "rm" prompt weigh whether the
+	// removal would actually discard work (uncommitted changes or unmerged
+	// commits) rather than warn unconditionally. Captured when the prompt opens.
+	base    string
+	stat    git.Stat
+	statErr bool // status couldn't be derived; treat rm as unsafe
+}
+
+// confirmFor builds a pending confirmation for an action against a workspace,
+// snapshotting its base and live status so the prompt can describe what (if
+// anything) the action puts at risk.
+func confirmFor(action string, v *workspace.View) confirm {
+	return confirm{
+		action:  action,
+		project: v.Worktree.Project,
+		branch:  v.Worktree.Branch,
+		base:    v.Worktree.Base,
+		stat:    v.Stat,
+		statErr: v.StatErr != nil,
+	}
 }
 
 // Model is the dashboard state.
@@ -372,12 +394,12 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "m":
 		if r, ok := m.currentWorkspace(); ok {
-			m.confirm = confirm{action: "merge", project: r.view.Worktree.Project, branch: r.view.Worktree.Branch}
+			m.confirm = confirmFor("merge", r.view)
 			m.mode = modeConfirm
 		}
 	case "x":
 		if r, ok := m.currentWorkspace(); ok {
-			m.confirm = confirm{action: "rm", project: r.view.Worktree.Project, branch: r.view.Worktree.Branch}
+			m.confirm = confirmFor("rm", r.view)
 			m.mode = modeConfirm
 		}
 	}

@@ -69,6 +69,68 @@ func TestFooterInputAndConfirm(t *testing.T) {
 	}
 }
 
+func TestConfirmPrompt(t *testing.T) {
+	mkView := func(dirty bool, ahead, added, deleted int, statErr error) *workspace.View {
+		v := wsView("alpha", "feat-1", dirty)
+		v.Worktree.Base = "master"
+		v.Stat.Ahead, v.Stat.Added, v.Stat.Deleted = ahead, added, deleted
+		v.StatErr = statErr
+		return &v
+	}
+
+	t.Run("merge is a plain caution", func(t *testing.T) {
+		got := confirmFor("merge", mkView(true, 3, 9, 1, nil)).prompt()
+		if !strings.Contains(got, "Merge alpha/feat-1?") || !strings.Contains(got, "[y/n]") {
+			t.Errorf("merge prompt = %q", got)
+		}
+	})
+
+	t.Run("clean and merged branch is safe", func(t *testing.T) {
+		got := confirmFor("rm", mkView(false, 0, 0, 0, nil)).prompt()
+		if !strings.Contains(got, "Safe to remove") || !strings.Contains(got, "vs master") {
+			t.Errorf("safe prompt = %q", got)
+		}
+		if strings.Contains(got, "discards") {
+			t.Errorf("safe prompt should not warn of discarded work: %q", got)
+		}
+	})
+
+	t.Run("uncommitted changes warn", func(t *testing.T) {
+		got := confirmFor("rm", mkView(true, 0, 0, 0, nil)).prompt()
+		if !strings.Contains(got, "discards uncommitted changes") || !strings.Contains(got, "work will be lost") {
+			t.Errorf("dirty prompt = %q", got)
+		}
+	})
+
+	t.Run("unmerged commits warn with counts", func(t *testing.T) {
+		got := confirmFor("rm", mkView(false, 2, 9, 1, nil)).prompt()
+		if !strings.Contains(got, "2 unmerged commits (+9 -1 vs master)") {
+			t.Errorf("ahead prompt = %q", got)
+		}
+	})
+
+	t.Run("single unmerged commit is singular", func(t *testing.T) {
+		got := confirmFor("rm", mkView(false, 1, 4, 0, nil)).prompt()
+		if !strings.Contains(got, "1 unmerged commit (") {
+			t.Errorf("singular prompt = %q", got)
+		}
+	})
+
+	t.Run("dirty and ahead are joined", func(t *testing.T) {
+		got := confirmFor("rm", mkView(true, 1, 4, 0, nil)).removeRisk()
+		if !strings.Contains(got, "uncommitted changes and 1 unmerged commit") {
+			t.Errorf("combined risk = %q", got)
+		}
+	})
+
+	t.Run("unknown status stays cautious", func(t *testing.T) {
+		got := confirmFor("rm", mkView(false, 0, 0, 0, errors.New("boom"))).prompt()
+		if !strings.Contains(got, "couldn't be verified") || strings.Contains(got, "Safe to remove") {
+			t.Errorf("statErr prompt = %q", got)
+		}
+	})
+}
+
 func TestWorkspaceLine(t *testing.T) {
 	done := wsView("p", "calm", false)
 	if l := workspaceLine(&done); !strings.Contains(l, "○") || !strings.Contains(l, "done") {
