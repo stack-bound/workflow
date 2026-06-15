@@ -1,0 +1,21 @@
+# .workFlow.yaml — per-repository WorkFlow settings.
+# All fields are optional.
+
+# Default base branch for new workspaces in this repo.
+base: main
+
+# Where worktrees for this repo are created.
+# Default: a sibling directory "<repo>_worktrees".
+# worktree_dir: ../myrepo_worktrees
+
+# Commands run (via sh -c) inside each new worktree after it is created.
+setup:
+  # - npm install
+
+# Repo-root-relative files copied into each new worktree.
+copy:
+  # - .env.example
+
+# Repo-root-relative files symlinked into each new worktree.
+symlink:
+  # - .env

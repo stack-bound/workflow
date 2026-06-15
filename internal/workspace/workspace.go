@@ -43,6 +43,18 @@ type View struct {
 	StatErr  error
 }
 
+// ErrUnregisteredRepo is returned when project resolution lands inside a git
+// repository whose root is not registered as a project. It carries the repo
+// root so callers (the CLI) can offer to register it. This is distinct from
+// "not in a git repo at all", which stays a plain error.
+type ErrUnregisteredRepo struct {
+	Root string
+}
+
+func (e *ErrUnregisteredRepo) Error() string {
+	return fmt.Sprintf("git repo %s is not registered as a project", e.Root)
+}
+
 // Active reports whether a workspace is still in play: dirty, ahead of base,
 // or carrying an open PR. The inverse (clean + merged) is cleanable.
 func (v View) Active() bool {
@@ -274,7 +286,8 @@ func (m *Manager) resolveProject(store *registry.Store, projectFlag string) (*re
 	if err != nil {
 		return nil, err
 	}
-	if root, err := git.RepoRoot(cwd); err == nil {
+	root, rootErr := git.RepoRoot(cwd)
+	if rootErr == nil {
 		if p := store.ProjectByPath(root); p != nil {
 			return p, nil
 		}
@@ -285,6 +298,11 @@ func (m *Manager) resolveProject(store *registry.Store, projectFlag string) (*re
 		if abs == store.Projects[i].Path || strings.HasPrefix(abs, store.Projects[i].Path+string(os.PathSeparator)) {
 			return &store.Projects[i], nil
 		}
+	}
+	// Inside a git repo, just not registered: signal precisely so the CLI can
+	// offer to register it. Outside any repo, stay a plain error.
+	if rootErr == nil {
+		return nil, &ErrUnregisteredRepo{Root: root}
 	}
 	return nil, fmt.Errorf("could not determine project; run inside a registered project or pass --project")
 }

@@ -1,0 +1,96 @@
+package cli
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
+
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/registry"
+)
+
+// stdinIsTTY reports whether stdin is an interactive terminal. It is a var so
+// tests can simulate (or suppress) an interactive prompt.
+var stdinIsTTY = func() bool {
+	return isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
+}
+
+// promptYesNo writes question to w and reads a yes/no answer from r. Empty
+// input returns def; only y/yes (or n/no) override it, anything else is "no".
+func promptYesNo(w io.Writer, r io.Reader, question string, def bool) (bool, error) {
+	hint := " [Y/n] "
+	if !def {
+		hint = " [y/N] "
+	}
+	if _, err := fmt.Fprint(w, question+hint); err != nil {
+		return false, err
+	}
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, err
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "":
+		return def, nil
+	case "y", "yes":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// registerOutcome reports what promptRegister did.
+type registerOutcome int
+
+const (
+	registeredNow     registerOutcome = iota // newly registered this call
+	alreadyRegistered                        // the repo was already a project
+	registerDeclined                         // declined, or no interactive terminal
+)
+
+// promptRegister offers to register the git repo at root as a project. On an
+// interactive terminal it asks first, naming the project and its path so a
+// wrong-folder run is obvious; with assumeYes it registers without asking. When
+// stdin is not a terminal and assumeYes is unset it leaves the repo unregistered
+// (registerDeclined) rather than silently mutating global state.
+func promptRegister(cmd *cobra.Command, root string, assumeYes bool) (*registry.Project, registerOutcome, error) {
+	rp, err := config.RegistryPath()
+	if err != nil {
+		return nil, registerDeclined, err
+	}
+	store, err := registry.Load(rp)
+	if err != nil {
+		return nil, registerDeclined, err
+	}
+	if existing := store.ProjectByPath(root); existing != nil {
+		return existing, alreadyRegistered, nil
+	}
+
+	name := uniqueProjectName(store, filepath.Base(root))
+	if !assumeYes {
+		if !stdinIsTTY() {
+			return nil, registerDeclined, nil
+		}
+		ok, err := promptYesNo(cmd.OutOrStdout(), cmd.InOrStdin(),
+			fmt.Sprintf("Register project %q (%s)?", name, root), true)
+		if err != nil {
+			return nil, registerDeclined, err
+		}
+		if !ok {
+			return nil, registerDeclined, nil
+		}
+	}
+
+	proj, err := registerProject(root, name)
+	if err != nil {
+		return nil, registerDeclined, err
+	}
+	return proj, registeredNow, nil
+}

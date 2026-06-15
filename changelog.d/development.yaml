@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - "`wf init` and `wf add` now offer to register the current repo as a project so it appears in the dashboard, prompting interactively (showing the project name and path) or registering straight away with `--yes`"
+changed:
+  - ""
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - ""
+security:
+  - ""
+yanked:
+  - ""

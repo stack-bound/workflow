@@ -14,10 +14,11 @@ import (
 
 func newInitCmd() *cobra.Command {
 	var force bool
+	var assumeYes bool
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Write an example .workFlow.yaml in the current repo",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		Short: "Write an example .workFlow.yaml in the current repo and register it",
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
@@ -33,11 +34,32 @@ func newInitCmd() *cobra.Command {
 			if err := os.WriteFile(path, []byte(config.ExampleRepoYAML()), 0o644); err != nil {
 				return err
 			}
-			fmt.Printf("Wrote %s\n", path)
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprintf(out, "Wrote %s\n", path)
+
+			// Offer to register the repo so it shows up in the dashboard. Only a
+			// git repo can be a project; a bare `init` in a non-repo just writes
+			// the template.
+			if !git.IsRepo(root) {
+				return nil
+			}
+			proj, outcome, err := promptRegister(cmd, root, assumeYes)
+			if err != nil {
+				return err
+			}
+			switch outcome {
+			case registeredNow:
+				_, _ = fmt.Fprintf(out, "Registered project %q at %s\n", proj.Name, proj.Path)
+			case alreadyRegistered:
+				_, _ = fmt.Fprintf(out, "Already registered as %q\n", proj.Name)
+			case registerDeclined:
+				_, _ = fmt.Fprintln(out, "Not registered. Register later with: wf project add")
+			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing .workFlow.yaml")
+	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "register the repo without prompting")
 	return cmd
 }
 

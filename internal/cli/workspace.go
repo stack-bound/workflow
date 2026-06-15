@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"text/tabwriter"
 
@@ -12,17 +13,36 @@ import (
 
 func newAddCmd() *cobra.Command {
 	var opts workspace.AddOptions
+	var assumeYes bool
 	cmd := &cobra.Command{
 		Use:   "add <branch>",
 		Short: "Create a branch + worktree workspace (runs setup)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Branch = args[0]
 			m, _, err := manager()
 			if err != nil {
 				return err
 			}
 			wt, err := m.Add(opts)
+			// If the cwd is a git repo that just isn't registered yet, offer to
+			// register it and retry — but only when the project wasn't named
+			// explicitly via --project.
+			var unreg *workspace.ErrUnregisteredRepo
+			if errors.As(err, &unreg) && opts.Project == "" {
+				proj, outcome, rerr := promptRegister(cmd, unreg.Root, assumeYes)
+				if rerr != nil {
+					return rerr
+				}
+				if outcome == registerDeclined {
+					if !assumeYes && !stdinIsTTY() {
+						return fmt.Errorf("%s is not registered; run `wf project add` or pass --yes", unreg.Root)
+					}
+					return fmt.Errorf("aborted: %s not registered", unreg.Root)
+				}
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Registered project %q at %s\n", proj.Name, proj.Path)
+				wt, err = m.Add(opts)
+			}
 			if err != nil {
 				return err
 			}
@@ -34,6 +54,7 @@ func newAddCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.Project, "project", "p", "", "project to create the workspace in (default: infer from cwd)")
 	cmd.Flags().StringVarP(&opts.Base, "base", "b", "", "base branch (default: repo/global config or detected default)")
 	cmd.Flags().BoolVar(&opts.NoSetup, "no-setup", false, "skip setup commands and file copy/symlink")
+	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "register the current repo without prompting if it isn't yet")
 	return cmd
 }
 

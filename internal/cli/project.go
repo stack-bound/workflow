@@ -34,38 +34,7 @@ func newProjectAddCmd() *cobra.Command {
 			if len(args) == 1 {
 				target = args[0]
 			}
-			abs, err := filepath.Abs(target)
-			if err != nil {
-				return err
-			}
-			if !git.IsRepo(abs) {
-				return fmt.Errorf("%s is not a git repository", abs)
-			}
-			root, err := git.RepoRoot(abs)
-			if err != nil {
-				return err
-			}
-
-			rp, err := config.RegistryPath()
-			if err != nil {
-				return err
-			}
-			var added registry.Project
-			err = registry.WithLock(rp, func(s *registry.Store) error {
-				if existing := s.ProjectByPath(root); existing != nil {
-					return fmt.Errorf("already registered as %q", existing.Name)
-				}
-				pname := name
-				if pname == "" {
-					pname = uniqueProjectName(s, filepath.Base(root))
-				}
-				added = registry.Project{
-					Name:    pname,
-					Path:    root,
-					AddedAt: time.Now().UTC().Format(time.RFC3339),
-				}
-				return s.AddProject(added)
-			})
+			added, err := registerProject(target, name)
 			if err != nil {
 				return err
 			}
@@ -128,6 +97,47 @@ func newProjectRmCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "remove even if it still has worktrees (drops them from the registry)")
 	return cmd
+}
+
+// registerProject registers the git repo containing path as a project, picking
+// a unique default name when name is empty. It is the shared core of
+// `wf project add` and the interactive auto-register prompt.
+func registerProject(path, name string) (*registry.Project, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	if !git.IsRepo(abs) {
+		return nil, fmt.Errorf("%s is not a git repository", abs)
+	}
+	root, err := git.RepoRoot(abs)
+	if err != nil {
+		return nil, err
+	}
+	rp, err := config.RegistryPath()
+	if err != nil {
+		return nil, err
+	}
+	var added registry.Project
+	err = registry.WithLock(rp, func(s *registry.Store) error {
+		if existing := s.ProjectByPath(root); existing != nil {
+			return fmt.Errorf("already registered as %q", existing.Name)
+		}
+		pname := name
+		if pname == "" {
+			pname = uniqueProjectName(s, filepath.Base(root))
+		}
+		added = registry.Project{
+			Name:    pname,
+			Path:    root,
+			AddedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		return s.AddProject(added)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &added, nil
 }
 
 // uniqueProjectName returns base, or base-2/base-3/… if already taken.
