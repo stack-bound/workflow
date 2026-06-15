@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.3.1] - 2026-06-15 (79.5%)
+### Added
+- `wf init` and `wf add` now offer to register the current repo as a project so it appears in the dashboard, prompting interactively (showing the project name and path) or registering straight away with `--yes`
+### Changed
+- `wf init` now detects the repo's default base branch (git's tracked default, otherwise preferring `development` over `main`/`master`) and, on an interactive terminal, prompts to confirm or pick it when several branches could be the base — instead of always writing `base: main`
+### Fixed
+- `wf add` no longer fails with `fatal: invalid reference: main` in repositories without a `main` branch, where `wf init` had hardcoded `base: main`
+- `wf add` now verifies the base branch exists first and, when it doesn't, reports a clear message listing the available branches and how to set a base — instead of surfacing git's raw `fatal: invalid reference` error
+
 ## [0.3.0] - 2026-06-15 (79.3)
 ### Added
 - Locally built binaries now report a `-dev` version with the short commit hash (and a `.dirty` marker when the working tree has uncommitted changes), so they are distinguishable from official releases
