@@ -17,7 +17,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/registry"
+	"github.com/stack-bound/workflow/internal/status"
 	"github.com/stack-bound/workflow/internal/tmux"
 )
 
@@ -39,8 +41,9 @@ type entry struct {
 	project string
 	branch  string
 	path    string
-	name    string // tmux window name (fallback label when untracked)
-	active  bool   // currently the session's active window
+	name    string       // tmux window name (fallback label when untracked)
+	active  bool         // currently the session's active window
+	state   status.State // live (TTL-resolved) agent status
 }
 
 // label is the human-readable name for the entry.
@@ -57,6 +60,7 @@ func (e entry) label() string {
 // Model is the sidebar state.
 type Model struct {
 	registryPath string
+	look         config.ResolvedStatus // resolved status glyphs/colors/TTL
 	entries      []entry
 	cursor       int
 	errMsg       string
@@ -72,14 +76,17 @@ type entriesMsg struct {
 }
 
 // New builds a sidebar model backed by the given registry path (used to map an
-// open window's worktree path back to its project/branch).
+// open window's worktree path back to its project/branch). The status look
+// defaults to the built-in preset; Run overrides it with the user's config.
 func New(registryPath string) Model {
-	return Model{registryPath: registryPath}
+	return Model{registryPath: registryPath, look: (&config.StatusConfig{}).Resolve()}
 }
 
-// Run starts the sidebar program.
-func Run(registryPath string) error {
-	p := tea.NewProgram(New(registryPath), tea.WithAltScreen())
+// Run starts the sidebar program with a resolved status presentation.
+func Run(registryPath string, look config.ResolvedStatus) error {
+	m := New(registryPath)
+	m.look = look
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
@@ -95,13 +102,33 @@ func tickCmd() tea.Cmd {
 
 func (m Model) refreshCmd() tea.Cmd {
 	rp := m.registryPath
+	ttl := m.look.TTL
 	return func() tea.Msg {
 		wins, err := tmux.Windows()
 		if err != nil {
 			return entriesMsg{err: err}
 		}
 		store, _ := registry.Load(rp) // best-effort: labels degrade to window name
-		return entriesMsg{entries: buildEntries(wins, store)}
+		es := buildEntries(wins, store)
+		attachStatus(es, ttl)
+		return entriesMsg{entries: es}
+	}
+}
+
+// attachStatus reads each entry's agent-status file and resolves it through the
+// TTL, so a stale working/waiting shows as idle. Entries without a project+branch
+// (untracked windows) can't be keyed, so they stay idle.
+func attachStatus(es []entry, ttl time.Duration) {
+	now := time.Now()
+	for i := range es {
+		if es[i].project == "" || es[i].branch == "" {
+			continue
+		}
+		st, ok, err := status.ReadFor(es[i].project, es[i].branch, es[i].path)
+		if err != nil || !ok {
+			continue
+		}
+		es[i].state = status.Effective(st.State, st.TS, ttl, now)
 	}
 }
 
@@ -229,11 +256,25 @@ func (m Model) View() string {
 
 func (m Model) renderEntry(i int, e entry) string {
 	mark := "●"
-	// The agent-status slot: empty in M3, filled by hooks in Stage 3.
-	status := "—"
-	line := fmt.Sprintf("%s %-20s %s", mark, e.label(), status)
+	line := fmt.Sprintf("%s %-20s %s", mark, e.label(), m.statusGlyph(e.state))
 	if i == m.cursor {
 		return activeStyle.Render("❯ " + line)
 	}
 	return "  " + openStyle.Render(line)
+}
+
+// statusGlyph renders the agent-status glyph for a state (idle → branch glyph),
+// in its configured colour. Falls back to a dim em dash if the glyph is unset.
+func (m Model) statusGlyph(st status.State) string {
+	if st == "" {
+		st = status.Idle
+	}
+	l := m.look.Look[string(st)]
+	if l.Glyph == "" {
+		return statusStyle.Render("—")
+	}
+	if l.Color != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(l.Color)).Render(l.Glyph)
+	}
+	return l.Glyph
 }

@@ -75,7 +75,7 @@ func tmuxBin(t *testing.T) string {
 // isolatedServer starts a private tmux server on a unique socket and points the
 // package at it. Teardown kills ONLY that server (never the default one), per
 // the repo's tmux-testing rules.
-func isolatedServer(t *testing.T) string {
+func isolatedServer(t *testing.T) {
 	t.Helper()
 	bin := tmuxBin(t)
 	socket := fmt.Sprintf("wf_test_%d", os.Getpid())
@@ -101,7 +101,6 @@ func isolatedServer(t *testing.T) string {
 			_ = os.Remove(p)
 		}
 	})
-	return socket
 }
 
 func TestWindowLifecycle(t *testing.T) {

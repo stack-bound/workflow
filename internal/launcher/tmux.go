@@ -1,6 +1,19 @@
 package launcher
 
-import "github.com/stack-bound/workflow/internal/tmux"
+import (
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/tmux"
+)
+
+// IdleName builds the initial window name for a wf-opened workspace: the idle
+// (branch) status glyph prefixed to the branch. Every wf window therefore
+// carries an icon from creation, so the tab layout never shifts when an agent
+// later flips it to working/waiting and back.
+func IdleName(g *config.Global, branch string) string {
+	look := g.StatusLook()
+	l := look.Look["idle"]
+	return tmux.WindowName(l.Glyph, branch, look.ColorMode, l.Color)
+}
 
 // Tmux is the tmux-window launcher backend, used when WorkFlow runs inside a
 // tmux session. It is a guest: it creates and selects real windows in the

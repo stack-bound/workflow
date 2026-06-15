@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/status"
 	"github.com/stack-bound/workflow/internal/tmux"
 	"github.com/stack-bound/workflow/internal/workspace"
 )
@@ -30,7 +31,7 @@ func newAddCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Branch = args[0]
-			m, _, err := manager()
+			m, g, err := manager()
 			if err != nil {
 				return err
 			}
@@ -62,7 +63,7 @@ func newAddCmd() *cobra.Command {
 			// so the setup output above stays put). Best-effort: a tmux failure
 			// must not undo a created workspace.
 			if tmux.Available() {
-				if made, werr := launcher.NewTmux().EnsureWindow(wt.Path, wt.Branch); werr != nil {
+				if made, werr := launcher.NewTmux().EnsureWindow(wt.Path, launcher.IdleName(g, wt.Branch)); werr != nil {
 					fmt.Printf("  (tmux window not created: %v)\n", werr)
 				} else if made {
 					fmt.Printf("  tmux window %q ready — jump with: wf open %s\n", wt.Branch, wt.Branch)
@@ -217,7 +218,7 @@ func newOpenCmd() *cobra.Command {
 				return err
 			}
 			if tmux.Available() && !editor {
-				return launcher.NewTmux().Open(path, args[0])
+				return launcher.NewTmux().Open(path, launcher.IdleName(g, args[0]))
 			}
 			return launcher.NewUniversal(g).OpenInEditor(path)
 		},
@@ -241,14 +242,17 @@ func newCloseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path, err := m.Path(args[0], project)
+			wt, err := m.Resolve(args[0], project)
 			if err != nil {
 				return err
 			}
-			closed, err := launcher.NewTmux().Close(path)
+			closed, err := launcher.NewTmux().Close(wt.Path)
 			if err != nil {
 				return err
 			}
+			// The window (and its agent) are gone; reflect idle so the dashboard
+			// and sidebar drop the working/waiting marker. Best-effort.
+			_ = status.Write(wt.Project, wt.Branch, wt.Path, status.Idle)
 			out := cmd.OutOrStdout()
 			if closed {
 				_, _ = fmt.Fprintf(out, "Closed the window for %s\n", args[0])

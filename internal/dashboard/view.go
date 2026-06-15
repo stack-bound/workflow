@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/stack-bound/workflow/internal/config"
+	"github.com/stack-bound/workflow/internal/status"
 	"github.com/stack-bound/workflow/internal/workspace"
 )
 
@@ -83,25 +85,30 @@ func (m Model) viewLedger() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(ledgerLegend())
+	b.WriteString(m.ledgerLegend())
 
 	return b.String() + m.footer()
 }
 
-// ledgerHeader is the dim column-heading row drawn beneath each project. The six
-// leading spaces stand in for a workspace row's cursor (2) + tmux mark (2) +
-// status circle and its trailing space (2), so "branch" sits above the names.
+// ledgerHeader is the dim column-heading row drawn beneath each project. The
+// eight leading spaces stand in for a workspace row's cursor (2) + tmux mark (2)
+// + agent-status cell (2) + status circle and its trailing space (2), so
+// "branch" sits above the names.
 func ledgerHeader() string {
-	h := fmt.Sprintf("      %-*s %-*s %-*s %-*s %s",
+	h := fmt.Sprintf("        %-*s %-*s %-*s %-*s %s",
 		colBranch, "branch", colState, "state", colAB, "behind|ahead", colDiff, "diff", "base")
 	return helpStyle.Render(h)
 }
 
 // ledgerLegend is the one-line key beneath the ledger explaining every glyph and
-// column, each sample drawn in the same colour it carries in the rows above.
-func ledgerLegend() string {
+// column, each sample drawn in the same colour it carries in the rows above. The
+// agent-status glyphs come from the resolved config so the key matches the rows.
+func (m Model) ledgerLegend() string {
 	sep := helpStyle.Render("   ")
+	look := m.global.StatusLook()
 	parts := []string{
+		legendGlyph(look.Look["working"]) + helpStyle.Render(" working"),
+		legendGlyph(look.Look["waiting"]) + helpStyle.Render(" waiting"),
 		activeStyle.Render("●") + helpStyle.Render(" active"),
 		cleanStyle.Render("○") + helpStyle.Render(" clean"),
 		tmuxStyle.Render("▣") + helpStyle.Render(" tmux open"),
@@ -110,6 +117,49 @@ func ledgerLegend() string {
 		dirtyStyle.Render("*") + helpStyle.Render(" uncommitted"),
 	}
 	return "  " + strings.Join(parts, sep)
+}
+
+// legendGlyph renders a status glyph in its own colour for the legend.
+func legendGlyph(l config.Look) string {
+	if l.Glyph == "" {
+		return ""
+	}
+	if l.Color != "" {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(l.Color)).Render(l.Glyph)
+	}
+	return l.Glyph
+}
+
+// agentLook returns the resolved Look for a workspace's effective agent status.
+// The dashboard highlights only *active* agents, so an idle/absent status yields
+// a zero Look (blank cell). The status is already TTL-resolved at refresh time.
+func (m Model) agentLook(v *workspace.View) config.Look {
+	if v == nil {
+		return config.Look{}
+	}
+	st, ok := m.statuses[v.Worktree.Path]
+	if !ok || st == status.Idle {
+		return config.Look{}
+	}
+	return m.global.StatusLook().Look[string(st)]
+}
+
+// agentCell renders the fixed 2-column agent-status indicator. colored controls
+// whether the glyph carries its state colour (off inside the highlighted
+// selected row). An idle/absent status renders as two blanks so the columns to
+// its right stay aligned with the header.
+func agentCell(l config.Look, colored bool) string {
+	if l.Glyph == "" {
+		return "  "
+	}
+	out := l.Glyph
+	if colored && l.Color != "" {
+		out = lipgloss.NewStyle().Foreground(lipgloss.Color(l.Color)).Render(l.Glyph)
+	}
+	if pad := 2 - lipgloss.Width(l.Glyph); pad > 0 {
+		out += strings.Repeat(" ", pad)
+	}
+	return out
 }
 
 func (m Model) renderRow(i int, r row) string {
@@ -139,14 +189,14 @@ func (m Model) renderRow(i int, r row) string {
 		if open {
 			indent = "▣ "
 		}
-		return prefix + selectedStyle.Render(indent+workspaceLine(r.view))
+		return prefix + selectedStyle.Render(indent+agentCell(m.agentLook(r.view), false)+workspaceLine(r.view))
 	}
 
 	indent := "  "
 	if open {
 		indent = tmuxStyle.Render("▣") + " "
 	}
-	return prefix + indent + workspaceStyled(r.view)
+	return prefix + indent + agentCell(m.agentLook(r.view), true) + workspaceStyled(r.view)
 }
 
 // wsState reports the status circle and word for a workspace, plus the colour

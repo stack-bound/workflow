@@ -15,6 +15,7 @@ import (
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/git"
 	"github.com/stack-bound/workflow/internal/registry"
+	"github.com/stack-bound/workflow/internal/status"
 )
 
 // Manager is the workspace engine.
@@ -239,6 +240,8 @@ func (m *Manager) Remove(ref, projectFlag string, force bool) (*registry.Worktre
 	}); err != nil {
 		return nil, err
 	}
+	// The worktree is gone; drop its agent-status file too (best-effort).
+	_ = status.Remove(wt.Project, wt.Branch, wt.Path)
 	return wt, nil
 }
 
@@ -280,6 +283,8 @@ func (m *Manager) Merge(ref, projectFlag string) (*registry.Worktree, error) {
 	}); err != nil {
 		return nil, err
 	}
+	// The worktree is gone; drop its agent-status file too (best-effort).
+	_ = status.Remove(wt.Project, wt.Branch, wt.Path)
 	return wt, nil
 }
 

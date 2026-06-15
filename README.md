@@ -61,6 +61,7 @@ wf rm feature-x                # remove a workspace without merging
 | `wf rm <branch>` | Remove a workspace (worktree + branch + registration) without merging |
 | `wf resurrect` | Open a tmux window for every tracked workspace (after a tmux/computer restart) |
 | `wf sidebar` | Live strip of the workspace windows open right now (tmux) |
+| `wf hooks install` | Install the Claude Code hooks that show live agent status (`uninstall`, `print`) |
 | `wf init` | Write an example `.workFlow.yaml` in the current repo |
 | `wf config` | Manage global config (`path`, `show`, `edit`) |
 | `wf completions <shell>` | Print a completion script; `wf completions install [shell]` installs it |
@@ -102,10 +103,51 @@ own keys; it never wraps or owns your session.
 Outside tmux these commands fall back gracefully: `open` uses your editor, and
 the window-only commands report that no tmux session was detected.
 
+## Agent status
+
+WorkFlow shows, live, when an agent is **working**, **waiting on you**, or
+**idle** in each workspace — in the tmux tab, the dashboard, and the sidebar.
+
+Install the Claude Code hooks once:
+
+```sh
+wf hooks install      # merges into ~/.claude/settings.json (idempotent)
+wf hooks uninstall    # remove them
+wf hooks print        # just print the hook JSON
+```
+
+The hooks call `wf set-status`, which figures out the workspace from the working
+directory, so a single install covers every current and future workspace (it
+does nothing outside a registered worktree). It works with any agent that can run
+a command on its lifecycle events — not just Claude Code.
+
+- **tmux:** the status icon lives *inside* the tab (prefixed to the window name,
+  e.g. `1 🤖 feat`), and the whole tab recolors while working/waiting, reverting
+  to your theme when idle.
+- **Dashboard:** a status glyph next to working/waiting workspaces, updated
+  instantly (no refresh needed).
+- **Sidebar:** the same glyph in its live strip.
+
+A stale `working`/`waiting` (an agent that died without firing its `Stop` hook)
+self-heals back to idle after a configurable TTL (default 5m).
+
 ## Configuration
 
 - **Global** — `$XDG_CONFIG_HOME/workFlow/config.yaml` (editor, clipboard command,
-  default base branch, worktree directory). Manage with `wf config`.
+  default base branch, worktree directory, and agent-status icons). Manage with
+  `wf config`. The optional `status:` block tunes the agent-status display:
+
+  ```yaml
+  status:
+    preset: nerdfont       # nerdfont (default) | emoji | ascii
+    color_mode: tab        # tab (whole tab) | glyph (icon only) | none
+    ttl: 5m                # a working/waiting older than this shows as idle
+    glyphs:                # optional per-state glyph overrides
+      working: "🤖"
+    colors:                # optional per-state ANSI-256 colors
+      working: "11"
+      waiting: "9"
+  ```
 - **Per-repo** — optional `.workFlow.yaml` at the repo root. Run `wf init` for a
   documented example:
 
