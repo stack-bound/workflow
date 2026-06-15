@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.0.1] - 2026-06-15
+### Added
+- Initial build adding the basic git-worktree features
+- Updated completions to auto install based on the current terminal being used
+
 # Notes
 [Deployment] Notes for deployment
 [Added] for new features.
