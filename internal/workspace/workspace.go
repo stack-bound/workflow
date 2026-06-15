@@ -1,0 +1,395 @@
+// Package workspace orchestrates the worktree lifecycle, tying together git,
+// the registry, and per-repo config. It is the engine the CLI (and later the
+// dashboard and agents) drive.
+package workspace
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/mattnelsonuk/workflow/internal/config"
+	"github.com/mattnelsonuk/workflow/internal/git"
+	"github.com/mattnelsonuk/workflow/internal/registry"
+)
+
+// Manager is the workspace engine.
+type Manager struct {
+	registryPath string
+	global       *config.Global
+}
+
+// New returns a Manager backed by the given registry path and global config.
+func New(registryPath string, global *config.Global) *Manager {
+	return &Manager{registryPath: registryPath, global: global}
+}
+
+// AddOptions configures creating a workspace.
+type AddOptions struct {
+	Branch  string // branch name (also drives the worktree dir slug)
+	Project string // project name; empty means infer from cwd
+	Base    string // base branch; empty means resolve from config/git
+	NoSetup bool   // skip per-repo setup commands and file copy/symlink
+}
+
+// View joins a registered worktree with its live git status.
+type View struct {
+	Worktree registry.Worktree
+	Stat     git.Stat
+	StatErr  error
+}
+
+// Active reports whether a workspace is still in play: dirty, ahead of base,
+// or carrying an open PR. The inverse (clean + merged) is cleanable.
+func (v View) Active() bool {
+	return v.Stat.Dirty || v.Stat.Ahead > 0 || v.Worktree.PRRef != ""
+}
+
+// Add creates a branch + worktree, runs setup, copies/symlinks files, and
+// registers the workspace.
+func (m *Manager) Add(opts AddOptions) (*registry.Worktree, error) {
+	if opts.Branch == "" {
+		return nil, fmt.Errorf("a branch name is required")
+	}
+
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	proj, err := m.resolveProject(store, opts.Project)
+	if err != nil {
+		return nil, err
+	}
+
+	repoCfg, err := config.LoadRepo(proj.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	base := m.resolveBase(opts.Base, repoCfg, proj.Path)
+	path, err := m.worktreePath(proj, repoCfg, opts.Branch)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil, fmt.Errorf("worktree path already exists: %s", path)
+	}
+
+	newBranch := !git.BranchExists(proj.Path, opts.Branch)
+	if err := git.WorktreeAdd(proj.Path, path, opts.Branch, base, newBranch); err != nil {
+		return nil, err
+	}
+
+	if !opts.NoSetup {
+		if err := applyFileOps(proj.Path, path, repoCfg); err != nil {
+			return nil, fmt.Errorf("worktree created but file setup failed: %w", err)
+		}
+		if err := runSetup(path, repoCfg.Setup); err != nil {
+			return nil, fmt.Errorf("worktree created but setup commands failed: %w", err)
+		}
+	}
+
+	wt := registry.Worktree{
+		Project:   proj.Name,
+		Path:      path,
+		Branch:    opts.Branch,
+		Base:      base,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := registry.WithLock(m.registryPath, func(s *registry.Store) error {
+		return s.AddWorktree(wt)
+	}); err != nil {
+		return nil, fmt.Errorf("worktree created but registration failed: %w", err)
+	}
+	return &wt, nil
+}
+
+// List returns every registered workspace joined with live git status.
+func (m *Manager) List() ([]View, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]View, 0, len(store.Worktrees))
+	for _, w := range store.Worktrees {
+		v := View{Worktree: w}
+		if _, err := os.Stat(w.Path); err == nil {
+			v.Stat, v.StatErr = git.Stats(w.Path, w.Base)
+		} else {
+			v.StatErr = fmt.Errorf("worktree path missing")
+		}
+		views = append(views, v)
+	}
+	return views, nil
+}
+
+// Path resolves a workspace reference to its filesystem path.
+func (m *Manager) Path(ref, projectFlag string) (string, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return "", err
+	}
+	wt, err := m.resolveWorktree(store, ref, projectFlag)
+	if err != nil {
+		return "", err
+	}
+	return wt.Path, nil
+}
+
+// Resolve returns the worktree matching ref (and optional project).
+func (m *Manager) Resolve(ref, projectFlag string) (*registry.Worktree, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	return m.resolveWorktree(store, ref, projectFlag)
+}
+
+// Remove removes a workspace: its worktree, its branch, and its registration.
+func (m *Manager) Remove(ref, projectFlag string, force bool) (*registry.Worktree, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	wt, err := m.resolveWorktree(store, ref, projectFlag)
+	if err != nil {
+		return nil, err
+	}
+	proj := store.FindProject(wt.Project)
+	if proj == nil {
+		return nil, fmt.Errorf("project %q for workspace not found", wt.Project)
+	}
+
+	if err := git.WorktreeRemove(proj.Path, wt.Path, force); err != nil {
+		return nil, err
+	}
+	if git.BranchExists(proj.Path, wt.Branch) {
+		if err := git.DeleteBranch(proj.Path, wt.Branch, force); err != nil {
+			return nil, fmt.Errorf("worktree removed but branch deletion failed: %w", err)
+		}
+	}
+	if err := registry.WithLock(m.registryPath, func(s *registry.Store) error {
+		s.RemoveWorktree(wt.Path)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return wt, nil
+}
+
+// Merge merges a workspace's branch into its base, then removes the worktree,
+// deletes the branch, and unregisters it.
+func (m *Manager) Merge(ref, projectFlag string) (*registry.Worktree, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	wt, err := m.resolveWorktree(store, ref, projectFlag)
+	if err != nil {
+		return nil, err
+	}
+	proj := store.FindProject(wt.Project)
+	if proj == nil {
+		return nil, fmt.Errorf("project %q for workspace not found", wt.Project)
+	}
+
+	// Refuse before touching base if the workspace has uncommitted work, so a
+	// merge is all-or-nothing rather than merging history then failing to clean
+	// up a dirty worktree.
+	if st, err := git.Stats(wt.Path, wt.Base); err == nil && st.Dirty {
+		return nil, fmt.Errorf("workspace %s/%s has uncommitted changes; commit or stash before merging", wt.Project, wt.Branch)
+	}
+
+	if err := git.Merge(proj.Path, wt.Base, wt.Branch); err != nil {
+		return nil, err
+	}
+	if err := git.WorktreeRemove(proj.Path, wt.Path, false); err != nil {
+		return nil, fmt.Errorf("merged, but removing the worktree failed: %w", err)
+	}
+	if err := git.DeleteBranch(proj.Path, wt.Branch, false); err != nil {
+		return nil, fmt.Errorf("merged and worktree removed, but deleting the branch failed: %w", err)
+	}
+	if err := registry.WithLock(m.registryPath, func(s *registry.Store) error {
+		s.RemoveWorktree(wt.Path)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return wt, nil
+}
+
+// resolveProject finds the project by flag, else infers it from the cwd.
+func (m *Manager) resolveProject(store *registry.Store, projectFlag string) (*registry.Project, error) {
+	if projectFlag != "" {
+		p := store.FindProject(projectFlag)
+		if p == nil {
+			return nil, fmt.Errorf("no project named %q (see: wf project ls)", projectFlag)
+		}
+		return p, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	if root, err := git.RepoRoot(cwd); err == nil {
+		if p := store.ProjectByPath(root); p != nil {
+			return p, nil
+		}
+	}
+	// Fall back to an ancestor match (cwd inside a registered project tree).
+	abs, _ := filepath.Abs(cwd)
+	for i := range store.Projects {
+		if abs == store.Projects[i].Path || strings.HasPrefix(abs, store.Projects[i].Path+string(os.PathSeparator)) {
+			return &store.Projects[i], nil
+		}
+	}
+	return nil, fmt.Errorf("could not determine project; run inside a registered project or pass --project")
+}
+
+// resolveWorktree matches a workspace by branch, optionally scoped to project.
+func (m *Manager) resolveWorktree(store *registry.Store, ref, projectFlag string) (*registry.Worktree, error) {
+	if ref == "" {
+		return nil, fmt.Errorf("a workspace (branch) name is required")
+	}
+	matches := store.FindWorktrees(ref, projectFlag)
+	switch len(matches) {
+	case 1:
+		w := matches[0]
+		return &w, nil
+	case 0:
+		return nil, fmt.Errorf("no workspace with branch %q", ref)
+	default:
+		var names []string
+		for _, w := range matches {
+			names = append(names, w.Project+"/"+w.Branch)
+		}
+		return nil, fmt.Errorf("workspace %q is ambiguous (%s); use --project", ref, strings.Join(names, ", "))
+	}
+}
+
+// resolveBase picks the base branch: explicit flag, then per-repo, then global,
+// then the repo's detected default branch.
+func (m *Manager) resolveBase(flag string, repoCfg *config.Repo, repoPath string) string {
+	if flag != "" {
+		return flag
+	}
+	if repoCfg.Base != "" {
+		return repoCfg.Base
+	}
+	if m.global.DefaultBase != "" {
+		return m.global.DefaultBase
+	}
+	if b, err := git.DefaultBranch(repoPath); err == nil {
+		return b
+	}
+	return "main"
+}
+
+// worktreePath computes where a new worktree should live.
+func (m *Manager) worktreePath(proj *registry.Project, repoCfg *config.Repo, branch string) (string, error) {
+	slug := Slug(branch)
+	if slug == "" {
+		return "", fmt.Errorf("branch %q produces an empty directory name", branch)
+	}
+
+	baseDir := repoCfg.WorktreeDir
+	if baseDir == "" {
+		baseDir = m.global.WorktreeDir
+	}
+	if baseDir == "" {
+		// Sibling directory: <parent>/<repo>_worktrees
+		parent := filepath.Dir(proj.Path)
+		baseDir = filepath.Join(parent, filepath.Base(proj.Path)+"_worktrees")
+	} else if !filepath.IsAbs(baseDir) {
+		baseDir = filepath.Join(proj.Path, baseDir)
+	}
+	return filepath.Join(baseDir, slug), nil
+}
+
+// Slug converts a branch name into a filesystem-safe directory name.
+func Slug(branch string) string {
+	var b strings.Builder
+	prevDash := false
+	for _, r := range strings.ToLower(branch) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			prevDash = false
+		default:
+			if !prevDash {
+				b.WriteRune('-')
+				prevDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// runSetup runs each setup command via sh -c in the worktree, streaming output.
+func runSetup(dir string, cmds []string) error {
+	for _, cmd := range cmds {
+		if strings.TrimSpace(cmd) == "" {
+			continue
+		}
+		c := exec.Command("sh", "-c", cmd)
+		c.Dir = dir
+		c.Stdin = os.Stdin
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			return fmt.Errorf("setup command %q: %w", cmd, err)
+		}
+	}
+	return nil
+}
+
+// applyFileOps copies and symlinks configured files from the repo root into a
+// new worktree.
+func applyFileOps(repoRoot, worktree string, repoCfg *config.Repo) error {
+	for _, rel := range repoCfg.Copy {
+		if err := copyInto(repoRoot, worktree, rel); err != nil {
+			return err
+		}
+	}
+	for _, rel := range repoCfg.Symlink {
+		src := filepath.Join(repoRoot, rel)
+		dst := filepath.Join(worktree, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.Symlink(src, dst); err != nil && !os.IsExist(err) {
+			return fmt.Errorf("symlink %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+func copyInto(repoRoot, worktree, rel string) error {
+	srcPath := filepath.Join(repoRoot, rel)
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("copy %s: %w", rel, err)
+	}
+	defer src.Close()
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	dstPath := filepath.Join(worktree, rel)
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+		return err
+	}
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("copy %s: %w", rel, err)
+	}
+	return nil
+}
