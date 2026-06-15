@@ -74,13 +74,13 @@ func Save(path string, s *Store) error {
 		return fmt.Errorf("create temp registry: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once renamed
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write temp registry: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("sync temp registry: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -104,11 +104,11 @@ func WithLock(path string, fn func(*Store) error) error {
 	if err != nil {
 		return fmt.Errorf("open registry lock: %w", err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("lock registry: %w", err)
 	}
-	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	defer func() { _ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN) }()
 
 	s, err := Load(path)
 	if err != nil {

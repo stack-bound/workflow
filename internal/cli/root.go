@@ -31,7 +31,7 @@ func newRootCmd() *cobra.Command {
 		// No subcommand: open the dashboard interactively, but fall back to the
 		// plain list when stdout is not a TTY (e.g. `wf | cat`) so it stays
 		// scriptable.
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if stdoutIsTTY() {
 				return runDashboard()
 			}

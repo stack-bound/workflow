@@ -15,7 +15,7 @@ func newDashboardCmd() *cobra.Command {
 		Aliases: []string{"dash", "ui"},
 		Short:   "Open the TUI ledger: projects → worktrees, diffs, merge, cleanup",
 		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return runDashboard()
 		},
 	}

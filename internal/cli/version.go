@@ -14,9 +14,9 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the wf version",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintf(cmd.OutOrStdout(), "wf version %s\n", cmd.Root().Version)
-			return nil
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "wf version %s\n", cmd.Root().Version)
+			return err
 		},
 	}
 }

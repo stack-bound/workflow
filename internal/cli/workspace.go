@@ -3,12 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow/internal/launcher"
 	"github.com/stack-bound/workflow/internal/workspace"
-	"github.com/spf13/cobra"
 )
 
 func newAddCmd() *cobra.Command {
@@ -17,7 +16,7 @@ func newAddCmd() *cobra.Command {
 		Use:   "add <branch>",
 		Short: "Create a branch + worktree workspace (runs setup)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			opts.Branch = args[0]
 			m, _, err := manager()
 			if err != nil {
@@ -44,7 +43,7 @@ func newListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List workspaces with live status",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runList(cmd, asJSON)
 		},
 	}
@@ -62,18 +61,19 @@ func runList(cmd *cobra.Command, asJSON bool) error {
 		return err
 	}
 
+	out := cmd.OutOrStdout()
 	if asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
 		return enc.Encode(toJSON(views))
 	}
 
 	if len(views) == 0 {
-		fmt.Println("No workspaces yet. Create one with: wf add <branch>")
+		_, _ = fmt.Fprintln(out, "No workspaces yet. Create one with: wf add <branch>")
 		return nil
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PROJECT\tBRANCH\tSTATE\tBASE\tA/B\tCHANGES\tPATH")
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "PROJECT\tBRANCH\tSTATE\tBASE\tA/B\tCHANGES\tPATH")
 	for _, v := range views {
 		state := "done"
 		if v.Active() {
@@ -89,7 +89,7 @@ func runList(cmd *cobra.Command, asJSON bool) error {
 			ab = "-"
 			changes = v.StatErr.Error()
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			v.Worktree.Project, v.Worktree.Branch, state, v.Worktree.Base, ab, changes, v.Worktree.Path)
 	}
 	return tw.Flush()
@@ -139,7 +139,7 @@ func newPathCmd() *cobra.Command {
 		Use:   "path <branch>",
 		Short: "Print a workspace's filesystem path (for shell cd integration)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			m, _, err := manager()
 			if err != nil {
 				return err
@@ -162,7 +162,7 @@ func newOpenCmd() *cobra.Command {
 		Use:   "open <branch>",
 		Short: "Open a workspace in your editor (universal launcher)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			m, g, err := manager()
 			if err != nil {
 				return err
@@ -184,7 +184,7 @@ func newCopyCmd() *cobra.Command {
 		Use:   "copy <branch>",
 		Short: "Copy a workspace's path to the clipboard",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			m, g, err := manager()
 			if err != nil {
 				return err
@@ -211,7 +211,7 @@ func newRmCmd() *cobra.Command {
 		Use:   "rm <branch>",
 		Short: "Remove a workspace: worktree + branch + registration (no merge)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			m, _, err := manager()
 			if err != nil {
 				return err
@@ -235,7 +235,7 @@ func newMergeCmd() *cobra.Command {
 		Use:   "merge <branch>",
 		Short: "Merge into base, then remove the worktree, branch, and registration",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			m, _, err := manager()
 			if err != nil {
 				return err

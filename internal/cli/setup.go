@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/git"
-	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
@@ -17,7 +17,7 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Write an example .workFlow.yaml in the current repo",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
@@ -54,7 +54,7 @@ func newConfigPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",
 		Short: "Print the global config file path",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			p, err := config.GlobalPath()
 			if err != nil {
 				return err
@@ -69,7 +69,7 @@ func newConfigShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
 		Short: "Show the effective global config",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			g, err := config.LoadGlobal()
 			if err != nil {
 				return err
@@ -89,7 +89,7 @@ func newConfigEditCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "edit",
 		Short: "Open the global config in your editor",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			g, err := config.LoadGlobal()
 			if err != nil {
 				return err

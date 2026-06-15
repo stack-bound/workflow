@@ -42,11 +42,9 @@ func run(dir string, args ...string) (string, error) {
 }
 
 // runIO runs git inheriting stdio so the user sees progress (e.g. merges).
-func runIO(dir string, args ...string) error {
+// Callers target a repo via an explicit "-C <repo>" rather than a working dir.
+func runIO(args ...string) error {
 	cmd := exec.Command("git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -101,7 +99,7 @@ func WorktreeAdd(repo, path, branch, base string, newBranch bool) error {
 	} else {
 		args = append(args, path, branch)
 	}
-	return runIO("", args...)
+	return runIO(args...)
 }
 
 // WorktreeRemove removes the worktree at path.
@@ -111,7 +109,7 @@ func WorktreeRemove(repo, path string, force bool) error {
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	return runIO("", args...)
+	return runIO(args...)
 }
 
 // Merge checks out base in repo and merges branch into it (no fast-forward so
@@ -119,11 +117,11 @@ func WorktreeRemove(repo, path string, force bool) error {
 // supplied so the merge is non-interactive — important for the dashboard,
 // which cannot host the merge-message editor mid-flow.
 func Merge(repo, base, branch string) error {
-	if err := runIO("", "-C", repo, "checkout", base); err != nil {
+	if err := runIO("-C", repo, "checkout", base); err != nil {
 		return err
 	}
 	msg := fmt.Sprintf("Merge branch '%s' into %s", branch, base)
-	return runIO("", "-C", repo, "merge", "--no-ff", "-m", msg, branch)
+	return runIO("-C", repo, "merge", "--no-ff", "-m", msg, branch)
 }
 
 // DeleteBranch deletes a local branch. force uses -D (unmerged-safe).
@@ -132,7 +130,7 @@ func DeleteBranch(repo, branch string, force bool) error {
 	if force {
 		flag = "-D"
 	}
-	return runIO("", "-C", repo, "branch", flag, branch)
+	return runIO("-C", repo, "branch", flag, branch)
 }
 
 // Diff returns the cumulative diff of a worktree against base: everything on

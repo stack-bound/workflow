@@ -7,10 +7,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/git"
 	"github.com/stack-bound/workflow/internal/registry"
-	"github.com/spf13/cobra"
 )
 
 func newProjectCmd() *cobra.Command {
@@ -29,7 +29,7 @@ func newProjectAddCmd() *cobra.Command {
 		Use:   "add [path]",
 		Short: "Register a git repo as a project (default: current directory)",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			target := "."
 			if len(args) == 1 {
 				target = args[0]
@@ -82,7 +82,7 @@ func newProjectListCmd() *cobra.Command {
 		Use:     "ls",
 		Aliases: []string{"list"},
 		Short:   "List registered projects",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			rp, err := config.RegistryPath()
 			if err != nil {
 				return err
@@ -96,9 +96,9 @@ func newProjectListCmd() *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tWORKSPACES\tPATH")
+			_, _ = fmt.Fprintln(tw, "NAME\tWORKSPACES\tPATH")
 			for _, p := range s.Projects {
-				fmt.Fprintf(tw, "%s\t%d\t%s\n", p.Name, len(s.WorktreesForProject(p.Name)), p.Path)
+				_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\n", p.Name, len(s.WorktreesForProject(p.Name)), p.Path)
 			}
 			return tw.Flush()
 		},
@@ -111,7 +111,7 @@ func newProjectRmCmd() *cobra.Command {
 		Use:   "rm <name>",
 		Short: "Unregister a project (does not touch the repo on disk)",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			rp, err := config.RegistryPath()
 			if err != nil {
 				return err

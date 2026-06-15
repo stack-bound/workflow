@@ -413,7 +413,7 @@ func copyInto(repoRoot, worktree, rel string) error {
 	if err != nil {
 		return fmt.Errorf("copy %s: %w", rel, err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 	info, err := src.Stat()
 	if err != nil {
 		return err
@@ -426,8 +426,13 @@ func copyInto(repoRoot, worktree, rel string) error {
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
 	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		return fmt.Errorf("copy %s: %w", rel, err)
+	}
+	// Surface a close error: for the write target it can report a flush failure
+	// that the copy itself did not see.
+	if err := dst.Close(); err != nil {
 		return fmt.Errorf("copy %s: %w", rel, err)
 	}
 	return nil
