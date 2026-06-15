@@ -14,6 +14,10 @@ import (
 // appDir is the directory name used under the XDG config root.
 const appDir = "workFlow"
 
+// RepoURL is the home of the WorkFlow (wf) CLI. It is referenced from generated
+// .workFlow.yaml files so a reader who finds one can discover the tool.
+const RepoURL = "https://github.com/stack-bound/workflow"
+
 // Global is the user-wide configuration, stored at <configdir>/config.yaml.
 type Global struct {
 	// Editor used by "open"/open-in-editor. Falls back to $VISUAL, $EDITOR,
@@ -158,6 +162,7 @@ func (g *Global) ResolveEditor() string {
 // default base branch (detected at init time; the user can edit it later).
 func ExampleRepoYAML(base string) string {
 	return fmt.Sprintf(`# .workFlow.yaml — per-repository WorkFlow settings.
+# Created by the wf (WorkFlow) CLI. Learn more: %s
 # All fields are optional.
 
 # Default base branch for new workspaces in this repo (detected at init; edit freely).
@@ -178,5 +183,5 @@ copy:
 # Repo-root-relative files symlinked into each new worktree.
 symlink:
   # - .env
-`, base)
+`, RepoURL, base)
 }

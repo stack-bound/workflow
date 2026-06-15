@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -172,11 +173,15 @@ func TestResolveEditor(t *testing.T) {
 }
 
 func TestExampleRepoYAMLIsValid(t *testing.T) {
+	out := ExampleRepoYAML("development")
 	var r Repo
-	if err := yaml.Unmarshal([]byte(ExampleRepoYAML("development")), &r); err != nil {
+	if err := yaml.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatalf("example YAML does not parse: %v", err)
 	}
 	if r.Base != "development" {
 		t.Errorf("example base = %q, want development", r.Base)
+	}
+	if !strings.Contains(out, RepoURL) {
+		t.Errorf("example YAML missing back-reference to %q", RepoURL)
 	}
 }
