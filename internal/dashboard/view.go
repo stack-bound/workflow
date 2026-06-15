@@ -32,7 +32,7 @@ var (
 // Column widths for a workspace row. ledgerHeader reuses them so the headings
 // line up with the marks and numbers underneath.
 const (
-	colBranch = 22
+	colBranch = 30
 	colState  = 7
 	colAB     = 12 // fits the "behind ahead" heading
 	colDiff   = 12

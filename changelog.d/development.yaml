@@ -15,7 +15,7 @@ deprecated:
 removed:
   - ""
 fixed:
-  - "Dashboard: long branch names no longer break the table — they're truncated with a `…` so the state, ahead/behind, diff, and base columns stay aligned"
+  - "Dashboard: long branch names no longer break the table — the branch column is wider, and any name still too long is truncated with a `…`, so the state, ahead/behind, diff, and base columns stay aligned"
 security:
   - ""
 yanked:
