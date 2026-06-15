@@ -227,6 +227,50 @@ func TestLedgerHeaderAlignsWithRow(t *testing.T) {
 	}
 }
 
+// TestFitBranch pins the branch column to a fixed width: short names pad out to
+// it, and an over-long name is clipped to it with a trailing … so it can never
+// exceed the column and shove the columns after it right.
+func TestFitBranch(t *testing.T) {
+	short := fitBranch("calm")
+	if w := lipgloss.Width(short); w != colBranch {
+		t.Errorf("short branch width = %d, want %d: %q", w, colBranch, short)
+	}
+	if !strings.HasPrefix(short, "calm") {
+		t.Errorf("short branch not preserved: %q", short)
+	}
+
+	long := fitBranch("feature/installation-location-experiment")
+	if w := lipgloss.Width(long); w != colBranch {
+		t.Errorf("long branch width = %d, want %d: %q", w, colBranch, long)
+	}
+	if !strings.HasSuffix(long, "…") {
+		t.Errorf("clipped branch missing … marker: %q", long)
+	}
+}
+
+// TestLongBranchKeepsColumnsAligned is the regression for the reported bug: a
+// branch longer than the column must not push the state heading and its value
+// out of line. Both header and row are measured by visible width to the "state"
+// column, which must match.
+func TestLongBranchKeepsColumnsAligned(t *testing.T) {
+	long := "feature/installation-location-experiment"
+	projects := []workspace.ProjectView{{
+		Project:    registry.Project{Name: "alpha", Path: "/a"},
+		Workspaces: []workspace.View{wsView("alpha", long, false)},
+	}}
+	m := readyModel(t)
+	m.setRows(projects)
+	m.cursor = 0 // project header selected → the workspace renders unselected
+
+	row := m.renderRow(1, m.rows[1])
+	h := ledgerHeader()
+	hCol := lipgloss.Width(h[:strings.Index(h, "state")])
+	rCol := lipgloss.Width(row[:strings.Index(row, "clean")])
+	if hCol != rCol {
+		t.Errorf("state heading at col %d, state value at col %d:\nhdr: %q\nrow: %q", hCol, rCol, h, row)
+	}
+}
+
 func TestRenderRowSelectionAndKinds(t *testing.T) {
 	m := readyModel(t)
 	// Project header row (index 0) selected.

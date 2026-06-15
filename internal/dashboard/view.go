@@ -178,16 +178,33 @@ func changesText(v *workspace.View) string {
 	return s
 }
 
+// fitBranch sizes a branch name to exactly the branch column: short names are
+// space-padded (as %-*s did), and a name wider than the column is clipped with a
+// trailing … so an over-long branch can never push the columns after it — state,
+// behind|ahead, diff, base — out of alignment with the header.
+func fitBranch(name string) string {
+	if lipgloss.Width(name) <= colBranch {
+		return fmt.Sprintf("%-*s", colBranch, name)
+	}
+	// Reserve one cell for the … marker, dropping trailing runes until the name
+	// plus the marker fits the column exactly (width-aware for multibyte names).
+	r := []rune(name)
+	for len(r) > 0 && lipgloss.Width(string(r))+1 > colBranch {
+		r = r[:len(r)-1]
+	}
+	return string(r) + "…"
+}
+
 // workspaceLine formats a workspace status line WITHOUT accent colours. It is the
 // layout reference and the body of the selected row (which gets one highlight).
 func workspaceLine(v *workspace.View) string {
 	w := v.Worktree
 	if v.StatErr != nil {
-		return fmt.Sprintf("! %-*s %s", colBranch, w.Branch, v.StatErr.Error())
+		return fmt.Sprintf("! %s %s", fitBranch(w.Branch), v.StatErr.Error())
 	}
 	mark, word, _ := wsState(v)
-	return fmt.Sprintf("%s %-*s %-*s %-*s %-*s %s",
-		mark, colBranch, w.Branch, colState, word, colAB, behindAhead(v), colDiff, changesText(v), w.Base)
+	return fmt.Sprintf("%s %s %-*s %-*s %-*s %s",
+		mark, fitBranch(w.Branch), colState, word, colAB, behindAhead(v), colDiff, changesText(v), w.Base)
 }
 
 // workspaceStyled formats a workspace status line with accent colours only: the
@@ -198,12 +215,12 @@ func workspaceLine(v *workspace.View) string {
 func workspaceStyled(v *workspace.View) string {
 	w := v.Worktree
 	if v.StatErr != nil {
-		return errStyle.Render(fmt.Sprintf("! %-*s %s", colBranch, w.Branch, v.StatErr.Error()))
+		return errStyle.Render(fmt.Sprintf("! %s %s", fitBranch(w.Branch), v.StatErr.Error()))
 	}
 	mark, word, style := wsState(v)
 	cols := []string{
 		style.Render(mark),
-		fmt.Sprintf("%-*s", colBranch, w.Branch),
+		fitBranch(w.Branch),
 		style.Render(fmt.Sprintf("%-*s", colState, word)),
 		helpStyle.Render(fmt.Sprintf("%-*s", colAB, behindAhead(v))),
 		styledChanges(v),
