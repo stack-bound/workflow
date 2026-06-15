@@ -6,7 +6,7 @@ one cockpit. Written in Go.
 
 ## Install
 
-### One-line install (no sudo)
+### One-line install
 
 ```sh
 curl -sSfL https://raw.githubusercontent.com/stack-bound/workflow/master/install.sh | sh
