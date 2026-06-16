@@ -1,7 +1,7 @@
 # WorkFlow (`wf`)
 
-A local-first, CLI-first developer tool that orchestrates isolated workspaces per piece of work — with live git status, review, and merge from
-one cockpit. Written in Go.
+A local-first, CLI-first developer tool that orchestrates isolated workspaces per piece of work — with live 
+git status, review, and merge from one cockpit. Written in Go.
 
 ## Install
 
