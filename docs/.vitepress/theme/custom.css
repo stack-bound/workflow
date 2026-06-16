@@ -1,0 +1,148 @@
+/**
+ * WorkFlow docs theme — emerald / terminal-green accent over the VitePress
+ * default theme. Retune the whole palette by editing the brand vars below.
+ */
+
+:root {
+  /* Brand ramp (light). brand-1 is link/accent text; brand-3 is solid button bg. */
+  --vp-c-brand-1: #0d9268;
+  --vp-c-brand-2: #10b981;
+  --vp-c-brand-3: #10b981;
+  --vp-c-brand-soft: rgba(16, 185, 129, 0.14);
+
+  /* Solid brand buttons (hero "Get Started"). */
+  --vp-button-brand-bg: #10b981;
+  --vp-button-brand-hover-bg: #0d9268;
+  --vp-button-brand-active-bg: #0b7a57;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-border: transparent;
+
+  /* Hero name gradient + glow. */
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(
+    120deg,
+    #10b981 30%,
+    #06b6d4
+  );
+  --vp-home-hero-image-background-image: linear-gradient(
+    -45deg,
+    rgba(16, 185, 129, 0.45) 50%,
+    rgba(6, 182, 212, 0.45) 50%
+  );
+  --vp-home-hero-image-filter: blur(48px);
+}
+
+.dark {
+  --vp-c-brand-1: #36d399;
+  --vp-c-brand-2: #10b981;
+  --vp-c-brand-3: #059669;
+  --vp-c-brand-soft: rgba(16, 185, 129, 0.18);
+
+  --vp-button-brand-bg: #10b981;
+  --vp-button-brand-hover-bg: #36d399;
+  --vp-button-brand-active-bg: #0d9268;
+}
+
+/* Slightly tighter, more confident feature cards. */
+.VPFeature {
+  transition: border-color 0.25s, background-color 0.25s;
+}
+.VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
+/* ----------------------------------------------------------------------------
+ * Faux-terminal panel (TerminalHero.vue + inline .wf-terminal blocks).
+ * Colours mirror the real dashboard's lipgloss palette.
+ * ------------------------------------------------------------------------- */
+
+.wf-terminal {
+  --term-bg: #0b0f12;
+  --term-bar: #161b21;
+  --term-fg: #d7dde3;
+  --term-dim: #7a8896;
+  --term-active: #3ad07f; /* ● active   (green)  */
+  --term-clean: #5aa9ff; /*  ○ clean    (blue)   */
+  --term-tmux: #34d3e0; /*   ▣ tmux     (cyan)   */
+  --term-add: #3ad07f; /*    +added    (green)  */
+  --term-del: #ff6b6b; /*    -removed  (red)    */
+  --term-star: #f2c14e; /*    *         (yellow) */
+  --term-proj: #c98bdb; /*   project    (magenta)*/
+  --term-sel-bg: #2bb3c0; /* selected row bg (cyan)*/
+
+  margin: 2.5rem auto 6rem;
+  max-width: 940px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--term-bg);
+  box-shadow: 0 18px 50px -24px rgba(16, 185, 129, 0.5),
+    0 8px 24px -16px rgba(0, 0, 0, 0.6);
+}
+
+.wf-terminal__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--term-bar);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.wf-terminal__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.wf-terminal__dot--r { background: #ff5f56; }
+.wf-terminal__dot--y { background: #febc2e; }
+.wf-terminal__dot--g { background: #28c840; }
+
+.wf-terminal__title {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--term-dim);
+  font-family: var(--vp-font-family-mono);
+}
+
+.wf-terminal__body {
+  margin: 0;
+  padding: 16px 18px;
+  overflow-x: auto;
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--term-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wf-terminal__line {
+  white-space: pre;
+}
+
+/* segment colours */
+.t-title  { color: #6ea8ff; font-weight: 700; }
+.t-head   { color: var(--term-dim); }
+.t-dim    { color: var(--term-dim); }
+.t-proj   { color: var(--term-proj); font-weight: 700; }
+.t-active { color: var(--term-active); }
+.t-clean  { color: var(--term-clean); }
+.t-tmux   { color: var(--term-tmux); }
+.t-add    { color: var(--term-add); }
+.t-del    { color: var(--term-del); }
+.t-star   { color: var(--term-star); }
+.t-legend { color: var(--term-dim); }
+.t-help   { color: var(--term-dim); }
+
+/* the selected ledger row: dark text on a cyan bar, like the real TUI */
+.wf-terminal__line.t-sel {
+  background: var(--term-sel-bg);
+  color: #06222a;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .wf-terminal__body { font-size: 11px; }
+}
