@@ -309,7 +309,7 @@ func TestOpenKeyWithRealManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr := workspace.New(regPath, &config.Global{})
-	m := New(mgr, &config.Global{Editor: "true"})
+	m := New(mgr, &config.Global{})
 	m, _ = step(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m, _ = step(m, ledgerMsg{projects: sampleLedger()})
 	m.cursor = 1 // alpha/feat-1

@@ -57,9 +57,53 @@ func (m Model) View() string {
 	switch m.mode {
 	case modeDiff:
 		return m.viewDiff()
+	case modePicker:
+		return m.viewPicker()
 	default:
 		return m.viewLedger()
 	}
+}
+
+// viewPicker draws the IDE chooser as a centered box over the ledger.
+func (m Model) viewPicker() string {
+	return overlayBox(m.viewLedger(), m.picker.Box(), m.width)
+}
+
+// overlayBox composites box centered over base, replacing the base rows the box
+// spans (rows above and below it stay visible, so it reads as a floating popup).
+// It centers within the body, leaving the last two lines (status + help) clear.
+func overlayBox(base, box string, width int) string {
+	baseLines := strings.Split(base, "\n")
+	boxLines := strings.Split(box, "\n")
+
+	boxW := 0
+	for _, l := range boxLines {
+		if w := lipgloss.Width(l); w > boxW {
+			boxW = w
+		}
+	}
+	leftPad := (width - boxW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+	pad := strings.Repeat(" ", leftPad)
+
+	// Vertically center the box in the body, keeping the title (first two lines)
+	// and the status/help (last two) visible so it reads as a popup over the
+	// ledger rather than a full-screen takeover.
+	const top = 2
+	avail := len(baseLines) - top - 2
+	start := top + (avail-len(boxLines))/2
+	if start < top {
+		start = top
+	}
+	for i, bl := range boxLines {
+		row := start + i
+		if row >= 0 && row < len(baseLines) {
+			baseLines[row] = pad + bl
+		}
+	}
+	return strings.Join(baseLines, "\n")
 }
 
 func (m Model) viewLedger() string {
@@ -327,14 +371,16 @@ func (m Model) footer() string {
 		help = "enter create · esc cancel"
 	case modeConfirm:
 		help = "y confirm · n cancel"
+	case modePicker:
+		help = "↑/↓ move · enter open · d default · a autolaunch · esc cancel"
 	default:
-		// Inside tmux, "o" opens the editor and "t" jumps to the window; without
-		// tmux there is just the single "open".
-		openHelp := "o open"
+		// "e" edits (autolaunch or picker) and "o" configures the editor; "t"
+		// jumps to the tmux window when wf is running inside tmux.
+		editHelp := "e edit · o config"
 		if m.inTmux {
-			openHelp = "o edit · t term"
+			editHelp += " · t term"
 		}
-		help = "↑/↓ move · enter diff · a add · " + openHelp + " · c copy · m merge · x rm · r refresh · q quit"
+		help = "↑/↓ move · enter diff · a add · " + editHelp + " · c copy · m merge · x rm · r refresh · q quit"
 	}
 	return "\n" + status + "\n" + helpStyle.Render(help)
 }

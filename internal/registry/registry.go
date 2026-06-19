@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -219,6 +220,28 @@ func (s *Store) RemoveWorktree(path string) bool {
 	}
 	s.Worktrees = out
 	return found
+}
+
+// WorktreeByPath returns the worktree whose path equals dir or contains it (dir
+// is inside the worktree), or nil. The longest (most specific) match wins. It
+// lets a command running inside a worktree find which workspace it is in —
+// worktrees live outside their project's tree, so a project-by-path search
+// alone cannot resolve them.
+func (s *Store) WorktreeByPath(dir string) *Worktree {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	var best *Worktree
+	for i := range s.Worktrees {
+		wp := s.Worktrees[i].Path
+		if abs == wp || strings.HasPrefix(abs, wp+string(os.PathSeparator)) {
+			if best == nil || len(wp) > len(best.Path) {
+				best = &s.Worktrees[i]
+			}
+		}
+	}
+	return best
 }
 
 // FindWorktrees returns worktrees matching branch, optionally scoped to a

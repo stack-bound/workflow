@@ -202,6 +202,62 @@ func (m *Manager) Path(ref, projectFlag string) (string, error) {
 	return wt.Path, nil
 }
 
+// ProjectRoot returns the filesystem root of a registered project by name. It
+// is where that project's .workFlow.yaml (and thus its editor preferences)
+// live, shared by all of the project's worktrees.
+func (m *Manager) ProjectRoot(name string) (string, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return "", err
+	}
+	p := store.FindProject(name)
+	if p == nil {
+		return "", fmt.Errorf("no project named %q", name)
+	}
+	return p.Path, nil
+}
+
+// ProjectForDir returns the project that owns dir: the worktree containing dir,
+// else the registered project whose tree contains dir. Returns "" when dir
+// belongs to no known project (e.g. an unregistered directory).
+func (m *Manager) ProjectForDir(dir string) (string, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return "", err
+	}
+	if w := store.WorktreeByPath(dir); w != nil {
+		return w.Project, nil
+	}
+	if p, err := m.resolveProject(store, ""); err == nil {
+		return p.Name, nil
+	}
+	return "", nil
+}
+
+// ProjectIDEPrefs returns a project's configured default editor id and whether
+// to autolaunch it, read from the project's .workFlow.yaml.
+func (m *Manager) ProjectIDEPrefs(project string) (defaultID string, autolaunch bool, err error) {
+	root, err := m.ProjectRoot(project)
+	if err != nil {
+		return "", false, err
+	}
+	rc, err := config.LoadRepo(root)
+	if err != nil {
+		return "", false, err
+	}
+	return rc.DefaultIDE, rc.Autolaunch, nil
+}
+
+// SetProjectDefaultIDE records a project's default editor and autolaunch flag in
+// its .workFlow.yaml.
+func (m *Manager) SetProjectDefaultIDE(project, ideID string, autolaunch bool) error {
+	root, err := m.ProjectRoot(project)
+	if err != nil {
+		return err
+	}
+	return config.SetRepoIDE(root, ideID, autolaunch)
+}
+
 // Resolve returns the worktree matching ref (and optional project).
 func (m *Manager) Resolve(ref, projectFlag string) (*registry.Worktree, error) {
 	store, err := registry.Load(m.registryPath)

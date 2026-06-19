@@ -49,6 +49,27 @@ func TestFindAndProjectByPath(t *testing.T) {
 	}
 }
 
+func TestWorktreeByPath(t *testing.T) {
+	s := &Store{}
+	_ = s.AddWorktree(Worktree{Project: "a", Path: "/wt/feat", Branch: "feat"})
+	_ = s.AddWorktree(Worktree{Project: "a", Path: "/wt/feat-sub", Branch: "sub"})
+
+	if w := s.WorktreeByPath("/wt/feat"); w == nil || w.Branch != "feat" {
+		t.Errorf("exact match = %+v", w)
+	}
+	// A path inside the worktree resolves to it.
+	if w := s.WorktreeByPath("/wt/feat/internal/cli"); w == nil || w.Branch != "feat" {
+		t.Errorf("ancestor match = %+v", w)
+	}
+	// "/wt/feat-sub" must not be swallowed by the "/wt/feat" prefix.
+	if w := s.WorktreeByPath("/wt/feat-sub/x"); w == nil || w.Branch != "sub" {
+		t.Errorf("prefix should respect path boundary, got %+v", w)
+	}
+	if w := s.WorktreeByPath("/somewhere/else"); w != nil {
+		t.Errorf("unrelated path = %+v, want nil", w)
+	}
+}
+
 func TestWorktreesForProject(t *testing.T) {
 	s := &Store{}
 	_ = s.AddWorktree(Worktree{Project: "a", Path: "/wt/a1", Branch: "a1"})
