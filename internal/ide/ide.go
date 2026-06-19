@@ -7,11 +7,13 @@ package ide
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/stack-bound/workflow/internal/config"
 )
@@ -252,15 +254,88 @@ func LaunchCmd(i IDE, dir string) *exec.Cmd {
 	return exec.Command(i.Exec[0], args...)
 }
 
-// RunDetached starts a GUI editor without waiting for it, so the caller (the CLI
-// or the dashboard) returns immediately. Its stdio is detached from the
-// terminal so the app cannot scribble over it.
+// launchGrace is how long RunDetached watches a freshly started GUI editor
+// before declaring it launched. A launcher that is going to fail outright (a
+// stale wrapper script, a binary that no longer exists) exits within this
+// window; one that has really opened a window — or handed off to a running
+// instance — is either still alive or has exited cleanly by then. Kept as a var
+// so tests can shorten it.
+var launchGrace = 300 * time.Millisecond
+
+// RunDetached starts a GUI editor without waiting for it to finish, so the
+// caller (the CLI or the dashboard) returns immediately. Its stdin/stdout are
+// detached from the terminal so the app cannot scribble over it. It then watches
+// the process for launchGrace: a launcher that exits non-zero in that window
+// never really opened (e.g. a stale JetBrains Toolbox script pointing at a snap
+// revision that no longer exists exits 127), so its error — with any captured
+// stderr — is returned instead of a false "launched". A process still running
+// after the window, or one that exits 0 immediately (it handed off to a running
+// instance), counts as a successful launch.
 func RunDetached(cmd *exec.Cmd) error {
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
+	cmd.Stdin, cmd.Stdout = nil, nil
+	// Capture stderr to a scratch file so a quick failure can be explained,
+	// without pinning an in-memory buffer open for the whole life of an editor
+	// that keeps running.
+	errLog, _ := os.CreateTemp("", "wf-launch-*.log")
+	if errLog != nil {
+		cmd.Stderr = errLog
+	} else {
+		cmd.Stderr = nil
+	}
+
 	if err := cmd.Start(); err != nil {
+		closeAndRemove(errLog)
 		return err
 	}
-	return cmd.Process.Release()
+
+	// Reap the child in the background so it never lingers as a zombie; the
+	// channel lets us notice an immediate exit within the grace window.
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			detail := readErrLog(errLog)
+			closeAndRemove(errLog)
+			if detail != "" {
+				return fmt.Errorf("%w: %s", err, detail)
+			}
+			return err
+		}
+		closeAndRemove(errLog)
+		return nil
+	case <-time.After(launchGrace):
+		// Still running: a real editor window. Unlink the scratch log now — the
+		// process keeps writing to its inherited fd and POSIX frees the inode on
+		// exit — and leave the goroutine above to reap the child when it closes.
+		if errLog != nil {
+			_ = os.Remove(errLog.Name())
+			_ = errLog.Close()
+		}
+		return nil
+	}
+}
+
+// readErrLog returns the trimmed tail of a launcher's captured stderr, or "".
+func readErrLog(f *os.File) string {
+	if f == nil {
+		return ""
+	}
+	b, err := os.ReadFile(f.Name())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// closeAndRemove closes and deletes a scratch file, tolerating a nil file.
+func closeAndRemove(f *os.File) {
+	if f == nil {
+		return
+	}
+	_ = f.Close()
+	_ = os.Remove(f.Name())
 }
 
 // linuxDesktopDirs returns the standard freedesktop application directories,

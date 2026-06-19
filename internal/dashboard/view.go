@@ -66,15 +66,23 @@ func (m Model) View() string {
 
 // viewPicker draws the IDE chooser as a centered box over the ledger.
 func (m Model) viewPicker() string {
-	return overlayBox(m.viewLedger(), m.picker.Box(), m.width)
+	return overlayBox(m.viewLedger(), m.picker.Box(), m.width, m.height)
 }
 
 // overlayBox composites box centered over base, replacing the base rows the box
 // spans (rows above and below it stay visible, so it reads as a floating popup).
 // It centers within the body, leaving the last two lines (status + help) clear.
-func overlayBox(base, box string, width int) string {
+func overlayBox(base, box string, width, height int) string {
 	baseLines := strings.Split(base, "\n")
 	boxLines := strings.Split(box, "\n")
+
+	// The ledger renders only its natural content height, which can be shorter
+	// than the terminal. Pad it up to the full screen height so the centered box
+	// has room — otherwise box rows past the end of the base get dropped below
+	// and the box is clipped (its bottom border vanishes).
+	for len(baseLines) < height {
+		baseLines = append(baseLines, "")
+	}
 
 	boxW := 0
 	for _, l := range boxLines {
@@ -99,9 +107,15 @@ func overlayBox(base, box string, width int) string {
 	}
 	for i, bl := range boxLines {
 		row := start + i
-		if row >= 0 && row < len(baseLines) {
-			baseLines[row] = pad + bl
+		if row < 0 {
+			continue
 		}
+		// Extend the base when the box is taller than the screen so its bottom
+		// rows still render instead of being clipped.
+		for row >= len(baseLines) {
+			baseLines = append(baseLines, "")
+		}
+		baseLines[row] = pad + bl
 	}
 	return strings.Join(baseLines, "\n")
 }

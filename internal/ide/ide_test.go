@@ -4,7 +4,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stack-bound/workflow/internal/config"
 )
@@ -144,5 +146,64 @@ func TestLaunchCmd(t *testing.T) {
 func TestFindMissing(t *testing.T) {
 	if _, ok := Find(nil, "nope"); ok {
 		t.Error("Find on empty slice should miss")
+	}
+}
+
+// A launcher that exits non-zero within the grace window (the stale-Toolbox-
+// script case: the wrapper runs but its target snap path is gone, so it exits
+// 127) must surface as an error — not a false "launched" — with its stderr.
+func TestRunDetachedReportsImmediateFailure(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	old := launchGrace
+	launchGrace = 2 * time.Second // cap only; the quick exit fires first
+	defer func() { launchGrace = old }()
+
+	err := RunDetached(exec.Command("sh", "-c", "echo boom >&2; exit 127"))
+	if err == nil {
+		t.Fatal("expected an error when the launcher exits non-zero immediately")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error should include captured stderr, got %v", err)
+	}
+}
+
+// A process still alive after the grace window is a real editor: a successful
+// launch, no error.
+func TestRunDetachedSucceedsForRunningProcess(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	old := launchGrace
+	launchGrace = 50 * time.Millisecond
+	defer func() { launchGrace = old }()
+
+	cmd := exec.Command("sh", "-c", "sleep 5")
+	if err := RunDetached(cmd); err != nil {
+		t.Fatalf("a process still running after the grace window is a successful launch, got %v", err)
+	}
+	_ = cmd.Process.Kill() // don't leave the sleeper around
+}
+
+// A launcher that hands off to a running instance and exits 0 right away is
+// still a successful launch.
+func TestRunDetachedSucceedsForQuickCleanExit(t *testing.T) {
+	if _, err := exec.LookPath("true"); err != nil {
+		t.Skip("true not available")
+	}
+	old := launchGrace
+	launchGrace = 2 * time.Second
+	defer func() { launchGrace = old }()
+
+	if err := RunDetached(exec.Command("true")); err != nil {
+		t.Fatalf("a quick clean exit should be a success, got %v", err)
+	}
+}
+
+// A command that cannot start at all (binary not found) still errors up front.
+func TestRunDetachedReportsStartFailure(t *testing.T) {
+	if err := RunDetached(exec.Command("wf-no-such-binary-xyz")); err == nil {
+		t.Fatal("expected an error when the binary cannot be started")
 	}
 }
