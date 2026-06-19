@@ -6,6 +6,8 @@ added:
   - "Custom editors can be added under `ides:` in the global config so the picker can launch an editor wf doesn't ship in its catalog"
   - "Dashboard: `e` opens the editor (autolaunching the project default when set, else a picker) and `o` configures it; the picker appears as a popup over the ledger"
   - "`wf edit --list` prints the editors detected on this machine and their ids"
+  - "Editor discovery finds snap-packaged IDEs via their Ubuntu menu entries and skips stale JetBrains Toolbox launcher scripts that point at a removed snap revision, so the picker resolves a launcher that actually works"
+  - "Launching a GUI editor reports a real error when the launcher fails to start (e.g. a broken wrapper script) instead of falsely reporting that it launched"
 changed:
   - "Outside tmux, `wf open` now launches the workspace's default editor instead of a single configured editor command"
 deprecated:

@@ -8,6 +8,7 @@ package ide
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,6 +78,7 @@ type Detector struct {
 	AppDirs     []string                     // macOS application dirs
 	statFile    func(string) (os.FileInfo, error)
 	openFile    func(string) (*os.File, error)
+	globFiles   func(string) ([]string, error)
 }
 
 // NewDetector returns a Detector wired to the real filesystem and OS.
@@ -88,6 +90,7 @@ func NewDetector() *Detector {
 		AppDirs:     macAppDirs(),
 		statFile:    os.Stat,
 		openFile:    os.Open,
+		globFiles:   filepath.Glob,
 	}
 }
 
@@ -108,6 +111,9 @@ func (d *Detector) Detect(g *config.Global) []IDE {
 	}
 	if d.openFile == nil {
 		d.openFile = os.Open
+	}
+	if d.globFiles == nil {
+		d.globFiles = filepath.Glob
 	}
 
 	var out []IDE
@@ -144,12 +150,20 @@ func (d *Detector) Detect(g *config.Global) []IDE {
 
 // detectCandidate resolves one catalog entry against the machine, returning the
 // launch command when present. PATH launchers win; then Linux .desktop files;
-// then macOS .app bundles.
+// then macOS .app bundles. A PATH launcher that is a wrapper script pointing at
+// a target that no longer exists (a stale JetBrains Toolbox script after a snap
+// revision bump — it starts and exits 127) is skipped so a working .desktop/.app
+// launcher below can win instead.
 func (d *Detector) detectCandidate(c candidate) (IDE, bool) {
 	for _, bin := range c.bins {
-		if _, err := d.LookPath(bin); err == nil {
-			return IDE{ID: c.id, Name: c.name, GUI: c.gui, Exec: []string{bin}}, true
+		path, err := d.LookPath(bin)
+		if err != nil {
+			continue
 		}
+		if d.scriptTargetMissing(path) {
+			continue
+		}
+		return IDE{ID: c.id, Name: c.name, GUI: c.gui, Exec: []string{bin}}, true
 	}
 	if d.GOOS == "linux" {
 		if argv, ok := d.findDesktopExec(c.desktops); ok {
@@ -164,21 +178,98 @@ func (d *Detector) detectCandidate(c candidate) (IDE, bool) {
 	return IDE{}, false
 }
 
-// findDesktopExec looks for any of names as a <name>.desktop file in the search
-// dirs and returns its parsed Exec= command (field codes stripped).
+// scriptTargetMissing reports whether path is a wrapper *script* (it starts with
+// a shebang) whose first absolute-path command no longer exists — the signature
+// of a stale JetBrains Toolbox launcher after a snap revision bump, which starts
+// and then exits 127. Binaries, PATH-based wrappers (no absolute target), and
+// unreadable files are treated as usable (false), so detection only ever skips a
+// launcher it is confident is broken.
+func (d *Detector) scriptTargetMissing(path string) bool {
+	f, err := d.openFile(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+
+	sc := bufio.NewScanner(io.LimitReader(f, 4096))
+	first := true
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if first {
+			first = false
+			if !strings.HasPrefix(line, "#!") {
+				return false // not a shell wrapper script
+			}
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		target := execLineTarget(line)
+		if target == "" {
+			continue // not an absolute-path command line; keep looking
+		}
+		_, err := d.statFile(target)
+		return err != nil // dead iff the wrapper's target is missing
+	}
+	return false
+}
+
+// execLineTarget returns the absolute path a wrapper line runs, or "". It matches
+// the shapes a generated launcher uses — `"/abs/path" "$@"` and `exec /abs/path
+// …` — and deliberately ignores anything else (PATH commands, cd/export lines)
+// so a working script is never mistaken for a dead one.
+func execLineTarget(line string) string {
+	line = strings.TrimSpace(strings.TrimPrefix(line, "exec "))
+	if strings.HasPrefix(line, `"/`) {
+		if end := strings.IndexByte(line[1:], '"'); end >= 0 {
+			return line[1 : 1+end]
+		}
+		return ""
+	}
+	if strings.HasPrefix(line, "/") {
+		if i := strings.IndexAny(line, " \t"); i >= 0 {
+			return line[:i]
+		}
+		return line
+	}
+	return ""
+}
+
+// findDesktopExec looks for a .desktop launcher for any of names in the search
+// dirs and returns its parsed Exec= command (field codes stripped). It tries the
+// plain "<name>.desktop" first, then snap's "<snap>_<app>.desktop" convention —
+// the Ubuntu menu entry for a snap, e.g.
+// intellij-idea-ultimate_intellij-idea-ultimate.desktop, whose Exec is the
+// reliable "/snap/bin/<snap>" wrapper.
 func (d *Detector) findDesktopExec(names []string) ([]string, bool) {
 	for _, dir := range d.DesktopDirs {
 		for _, name := range names {
 			path := filepath.Join(dir, name+".desktop")
-			if _, err := d.statFile(path); err != nil {
-				continue
+			if _, err := d.statFile(path); err == nil {
+				if argv, ok := d.parseDesktopExec(path); ok {
+					return argv, true
+				}
 			}
-			if argv, ok := d.parseDesktopExec(path); ok {
-				return argv, true
+			for _, snapPath := range d.snapDesktops(dir, name) {
+				if argv, ok := d.parseDesktopExec(snapPath); ok {
+					return argv, true
+				}
 			}
 		}
 	}
 	return nil, false
+}
+
+// snapDesktops returns the snap-style "<name>_*.desktop" menu entries in dir;
+// snap names its desktop files "<snap>_<app>.desktop" rather than the bare app
+// name, so a plain lookup misses them.
+func (d *Detector) snapDesktops(dir, name string) []string {
+	matches, err := d.globFiles(filepath.Join(dir, name+"_*.desktop"))
+	if err != nil {
+		return nil
+	}
+	return matches
 }
 
 // parseDesktopExec reads the Exec= line from a .desktop file, dropping the
