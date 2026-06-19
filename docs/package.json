@@ -1,0 +1,17 @@
+{
+  "name": "workflow-docs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Documentation website for WorkFlow (wf) — https://github.com/stack-bound/workflow",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "deploy": "npm run build && wrangler pages deploy .vitepress/dist"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4",
+    "vue": "^3.5.38"
+  }
+}

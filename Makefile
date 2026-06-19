@@ -5,7 +5,7 @@ COVERAGE := coverage.out
 # the same place the README install does (no duplicate wf on PATH).
 INSTALL_DIR ?= $(HOME)/.local/bin
 
-.PHONY: build install test test-coverage lint clean
+.PHONY: build install test test-coverage lint clean docs docs-build docs-deploy
 
 build: ## Build the wf binary (stamped with a -dev version + short commit)
 	go build -o $(BINARY) ./cmd/wf
@@ -27,3 +27,12 @@ lint: ## Run golangci-lint
 
 clean: ## Remove build and coverage artifacts
 	rm -f $(BINARY) $(COVERAGE)
+
+docs: ## Run the documentation site locally (VitePress dev server)
+	cd docs && npm install && npm run dev
+
+docs-build: ## Build the static documentation site (output: docs/.vitepress/dist)
+	cd docs && npm ci && npm run build
+
+docs-deploy: ## Build and deploy the docs to Cloudflare Pages (needs wrangler auth)
+	cd docs && npm run deploy

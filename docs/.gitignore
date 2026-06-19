@@ -1,0 +1,7 @@
+# Node / VitePress build artifacts for the docs site.
+node_modules/
+.vitepress/dist/
+.vitepress/cache/
+
+# Raw output from capture/capture.sh (curated images are committed separately).
+capture/output/

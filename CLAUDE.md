@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `wf` (WorkFlow) — a Go CLI (Cobra) that orchestrates git worktrees as isolated workspaces with live git status and optional tmux integration. Single module: `github.com/stack-bound/workflow`. Entry point: `cmd/wf/main.go`; logic lives under `internal/`. Architecture and roadmap: `@ai/specs/build-plan.md` and `@ai/specs/progress.md`.
 
+## Playwright MCP server
+
+If I ask you to use the Playwright MCP server and you can't find it among the
+available tools, **stop immediately and tell me you can't see it.** Do not
+substitute another browser tool or try to drive Playwright yourself (e.g. via
+`npx`, a script, or a cached browser) — just report that the server isn't
+connected and wait for me.
+
 ## Build & test
 
 ```bash

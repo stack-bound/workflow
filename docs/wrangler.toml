@@ -1,0 +1,10 @@
+# Cloudflare Pages project for the WorkFlow docs site.
+#
+# With this file present you can deploy the built site from this folder with a
+# bare `wrangler pages deploy` (it reads the output dir below), or use the npm
+# script `npm run deploy` / `make docs-deploy`, which build first then upload.
+#
+# `wrangler` is expected to be installed and authenticated (`wrangler login`);
+# it is intentionally NOT a project dependency so `npm install` stays light.
+name = "workflow-docs"
+pages_build_output_dir = ".vitepress/dist"
