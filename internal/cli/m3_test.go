@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/registry"
 )
 
@@ -30,10 +31,20 @@ func TestTmuxCommandsRequireTmux(t *testing.T) {
 	}
 }
 
-// Outside tmux, `open` falls through to the editor launcher.
-func TestOpenFallsBackToEditor(t *testing.T) {
-	isolateConfig(t)
-	t.Setenv("EDITOR", "true") // a no-op editor that exists on PATH
+// Outside tmux, `open` launches the workspace's default editor. A custom
+// "no-op" editor (the `true` binary) keeps this deterministic across machines.
+func TestOpenLaunchesDefaultEditor(t *testing.T) {
+	cfg := isolateConfig(t)
+	if _, err := exec.LookPath("true"); err != nil {
+		t.Skip("no 'true' binary available")
+	}
+	if err := config.SaveGlobal(&config.Global{
+		DefaultIDE: "noop",
+		IDEs:       []config.IDESpec{{ID: "noop", Name: "Noop", Cmd: "true"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = cfg
 	repo := gitRepo(t)
 	if _, err := execWF(t, "project", "add", repo, "--name", "proj"); err != nil {
 		t.Fatal(err)
@@ -42,10 +53,7 @@ func TestOpenFallsBackToEditor(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := execWF(t, "open", "feat", "--project", "proj"); err != nil {
-		t.Errorf("open (editor fallback): %v", err)
-	}
-	if _, err := execWF(t, "open", "feat", "--project", "proj", "--editor"); err != nil {
-		t.Errorf("open --editor: %v", err)
+		t.Errorf("open (editor launch): %v", err)
 	}
 }
 

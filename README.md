@@ -38,7 +38,8 @@ wf project add                 # register the current repo as a project
 wf add feature-x               # create a branch + worktree (+ run setup)
 wf list                        # see every workspace with live git status
 wf path feature-x              # print the worktree path (for shell cd)
-wf open feature-x              # jump to its tmux window (or open it in $EDITOR)
+wf edit feature-x              # open it in an editor (pick from your installed IDEs)
+wf open feature-x              # jump to its tmux window (or launch its editor outside tmux)
 wf merge feature-x             # merge into base, then remove worktree + branch
 wf rm feature-x                # remove a workspace without merging
 ```
@@ -53,7 +54,8 @@ wf rm feature-x                # remove a workspace without merging
 | `wf add <branch>` | Create a branch + worktree workspace and run setup |
 | `wf list` (`ls`) | List workspaces with live status (`--json` for scripts) |
 | `wf path <branch>` | Print a workspace's filesystem path |
-| `wf open <branch>` | Jump to the workspace's tmux window (or open it in your editor outside tmux; `--editor` forces the editor) |
+| `wf edit [branch]` | Open an editor/IDE on a workspace (current dir by default) via a picker; `--list` shows detected editors |
+| `wf open <branch>` | Jump to the workspace's tmux window (or launch its default editor outside tmux) |
 | `wf close <branch>` | Close the workspace's tmux window (keeps the worktree and branch) |
 | `wf copy <branch>` | Copy a workspace path to the clipboard |
 | `wf merge <branch>` | Merge into base, then remove the worktree, branch, and registration |
@@ -79,11 +81,38 @@ auto-load theirs; for zsh it prints the one-time `fpath` line to add).
 A workspace is referenced by its **branch name**. When the same branch exists in
 two projects, disambiguate with `--project <name>`.
 
+## Editors
+
+`wf edit` opens a workspace in an editor or IDE. It **scans your machine** for
+installed editors — VS Code, the JetBrains IDEs (IntelliJ IDEA, GoLand, PyCharm,
+WebStorm, …), Sublime, Zed, Cursor, and terminal editors like Vim/Neovim — and
+shows a picker:
+
+```sh
+wf edit                 # open the current directory; pick an editor
+wf edit feature-x       # target another workspace by branch
+wf edit --list          # list the editors detected on this machine (and their ids)
+```
+
+In the picker, use ↑/↓ to move and **Enter** to launch. GUI IDEs open detached;
+terminal editors take over the terminal. Press **d** to set the highlighted
+editor as this project's default (it floats to the top next time), or **a** to
+set it as default *and* toggle **autolaunch** — when autolaunch is on, `wf edit`
+opens the default straight away. Use `wf edit --pick` to force the picker anyway.
+
+The default and autolaunch flag are **per project** (stored in the repo's
+`.workFlow.yaml`), so a Go repo can default to GoLand while a frontend repo
+defaults to WebStorm. In the **dashboard**, `e` edits (autolaunching the default
+when set, else opening the picker) and `o` always opens the picker to configure.
+
+To add an editor `wf` doesn't know about, define it under `ides:` in the global
+config (see [Configuration](#configuration)).
+
 ## Dashboard & tmux
 
 Run `wf` with no command to open the **dashboard** — a cross-project ledger of
 projects → workspaces with live git status, an active/done flag, a scrollable
-diff viewer, and actions (add, open, copy, merge, rm). It works in any terminal;
+diff viewer, and actions (add, edit, copy, merge, rm). It works in any terminal;
 when stdout is not a TTY, `wf` prints the plain list instead.
 
 When you run inside **tmux**, WorkFlow lights up as a *guest* — it creates real
@@ -99,8 +128,9 @@ own keys; it never wraps or owns your session.
 - `wf sidebar` is a thin, always-on strip of the windows open right now — run it
   in a split pane.
 
-Outside tmux these commands fall back gracefully: `open` uses your editor, and
-the window-only commands report that no tmux session was detected.
+Outside tmux these commands fall back gracefully: `open` launches the
+workspace's default editor (use `wf edit` to choose one), and the window-only
+commands report that no tmux session was detected.
 
 ## Agent status
 
@@ -132,9 +162,22 @@ self-heals back to idle after a configurable TTL (default 5m).
 
 ## Configuration
 
-- **Global** — `$XDG_CONFIG_HOME/workFlow/config.yaml` (editor, clipboard command,
-  default base branch, worktree directory, and agent-status icons). Manage with
-  `wf config`. The optional `status:` block tunes the agent-status display:
+- **Global** — `$XDG_CONFIG_HOME/workFlow/config.yaml` (clipboard command,
+  default base branch, worktree directory, a fallback default editor, custom
+  editors, and agent-status icons). Manage with `wf config`. Define editors
+  `wf` doesn't ship in its catalog under `ides:`, and optionally a fallback
+  `default_ide` used when a repo pins none:
+
+  ```yaml
+  default_ide: goland          # fallback editor id when a repo sets none
+  ides:                        # custom editors merged into the detected catalog
+    - id: my-editor
+      name: My Editor
+      cmd: my-editor --new     # the target directory is appended
+      gui: true                # true: windowed app (launch detached); false: terminal
+  ```
+
+  The optional `status:` block tunes the agent-status display:
 
   ```yaml
   status:
@@ -152,6 +195,8 @@ self-heals back to idle after a configurable TTL (default 5m).
 
 ```yaml
 base: main                 # default base branch for new workspaces
+default_ide: goland        # default editor for `wf edit` (an id from `wf edit --list`)
+autolaunch: false          # true: `wf edit` opens default_ide without the picker
 worktree_dir: ../wt        # where worktrees go (default: ../<repo>_worktrees)
 setup:                     # commands run (sh -c) in each new worktree
   - npm install

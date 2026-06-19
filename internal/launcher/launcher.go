@@ -1,6 +1,7 @@
-// Package launcher adapts "open a workspace" to the environment. M1 ships the
-// universal backend (path / copy-to-clipboard / open-in-editor) that works in
-// any terminal; the tmux window backend arrives in M3.
+// Package launcher adapts "open a workspace" to the environment. The universal
+// backend handles copy-to-clipboard in any terminal; the tmux window backend
+// jumps to a workspace's window. Opening a workspace in an editor lives in the
+// ide package and the "wf edit" command / dashboard picker.
 package launcher
 
 import (
@@ -37,29 +38,6 @@ func (u *Universal) CopyPath(path string) error {
 	}
 	if err := clipboard.WriteAll(path); err != nil {
 		return fmt.Errorf("copy to clipboard failed (set clipboard_cmd or install xclip/xsel/wl-clipboard): %w", err)
-	}
-	return nil
-}
-
-// EditorCommand builds (without running) the command to open path in the
-// resolved editor. The CLI runs it directly; the TUI runs it via
-// tea.ExecProcess so a terminal editor can take over the screen cleanly.
-func (u *Universal) EditorCommand(path string) *exec.Cmd {
-	editor := u.cfg.ResolveEditor()
-	// Support editors configured with arguments, e.g. "code -n".
-	parts := strings.Fields(editor)
-	args := append(parts[1:], path)
-	return exec.Command(parts[0], args...)
-}
-
-// OpenInEditor opens path in the resolved editor.
-func (u *Universal) OpenInEditor(path string) error {
-	c := u.EditorCommand(path)
-	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("open editor %q: %w", u.cfg.ResolveEditor(), err)
 	}
 	return nil
 }

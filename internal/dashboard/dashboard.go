@@ -17,7 +17,9 @@ import (
 
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/git"
+	"github.com/stack-bound/workflow/internal/ide"
 	"github.com/stack-bound/workflow/internal/launcher"
+	"github.com/stack-bound/workflow/internal/picker"
 	"github.com/stack-bound/workflow/internal/status"
 	"github.com/stack-bound/workflow/internal/tmux"
 	"github.com/stack-bound/workflow/internal/workspace"
@@ -35,6 +37,7 @@ const (
 	modeDiff
 	modeInput
 	modeConfirm
+	modePicker
 )
 
 // rowKind distinguishes a project header from a workspace line.
@@ -107,6 +110,14 @@ type Model struct {
 
 	confirm confirm
 
+	// IDE picker overlay state. picker holds the chooser; the three fields below
+	// remember which workspace it was opened for so its result can launch the
+	// right path and persist to the right project.
+	picker        picker.Model
+	pickerProject string
+	pickerBranch  string
+	pickerPath    string
+
 	status    string
 	statusErr bool
 
@@ -140,6 +151,21 @@ type actionMsg struct {
 	msg     string
 	err     error
 	refresh bool
+}
+
+// editMsg carries the result of resolving a workspace's editor preferences off
+// the main loop (path lookup + per-project default/autolaunch + machine
+// detection), so the key handler stays free of engine calls. Update then either
+// autolaunches the default or opens the picker.
+type editMsg struct {
+	project     string
+	branch      string
+	path        string
+	ides        []ide.IDE
+	defaultID   string
+	autolaunch  bool
+	forcePicker bool
+	err         error
 }
 
 type tickMsg time.Time
@@ -323,15 +349,76 @@ func (m Model) openWindowCmd(project, branch string) tea.Cmd {
 	}
 }
 
-func (m Model) openEditorCmd(project, branch string) tea.Cmd {
-	path, err := m.mgr.Path(branch, project)
-	if err != nil {
-		return func() tea.Msg { return actionMsg{err: err} }
+// startEditCmd resolves a workspace's editor preferences off the main loop and
+// emits an editMsg. forcePicker (the "configure" key) always opens the picker;
+// otherwise autolaunch decides. Engine calls live here, not in the key handler,
+// so step()-based tests never touch a nil manager.
+func (m Model) startEditCmd(project, branch string, forcePicker bool) tea.Cmd {
+	mgr := m.mgr
+	g := m.global
+	return func() tea.Msg {
+		path, err := mgr.Path(branch, project)
+		if err != nil {
+			return editMsg{err: err}
+		}
+		defaultID, autolaunch, _ := mgr.ProjectIDEPrefs(project)
+		if defaultID == "" {
+			defaultID = g.DefaultIDE
+		}
+		return editMsg{
+			project:     project,
+			branch:      branch,
+			path:        path,
+			ides:        ide.Detect(g),
+			defaultID:   defaultID,
+			autolaunch:  autolaunch,
+			forcePicker: forcePicker,
+		}
 	}
-	cmd := launcher.NewUniversal(m.global).EditorCommand(path)
+}
+
+// launchIDECmd opens dir in the chosen editor. A GUI app launches detached (it
+// must not block or suspend the dashboard); a terminal editor runs via
+// ExecProcess so it can take over the screen, then the ledger refreshes.
+func (m Model) launchIDECmd(i ide.IDE, dir, branch string) tea.Cmd {
+	cmd := ide.LaunchCmd(i, dir)
+	if i.GUI {
+		return func() tea.Msg {
+			if err := ide.RunDetached(cmd); err != nil {
+				return actionMsg{err: err}
+			}
+			return actionMsg{msg: "launched " + i.Name + " for " + branch}
+		}
+	}
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return actionMsg{msg: "opened " + branch + " in editor", err: err, refresh: true}
+		return actionMsg{msg: "opened " + branch + " in " + i.Name, err: err, refresh: true}
 	})
+}
+
+// persistDefaultCmd writes a project's default editor. When alsoAutolaunch is
+// set it toggles autolaunch (off when the editor is already the autolaunching
+// default, on otherwise); otherwise it leaves autolaunch unchanged.
+func (m Model) persistDefaultCmd(project string, i ide.IDE, alsoAutolaunch bool) tea.Cmd {
+	mgr := m.mgr
+	return func() tea.Msg {
+		curDefault, curAuto, _ := mgr.ProjectIDEPrefs(project)
+		autolaunch := curAuto
+		msg := i.Name + " is the default editor for " + project
+		if alsoAutolaunch {
+			// Toggle off only when this editor is already the autolaunching
+			// default; otherwise turn autolaunch on.
+			autolaunch = !curAuto || curDefault != i.ID
+			if autolaunch {
+				msg = "autolaunch on: " + i.Name + " for " + project
+			} else {
+				msg = "autolaunch off for " + project
+			}
+		}
+		if err := mgr.SetProjectDefaultIDE(project, i.ID, autolaunch); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: msg}
+	}
 }
 
 // --- update ---
@@ -406,6 +493,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case editMsg:
+		return m.handleEditMsg(msg)
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -435,8 +525,52 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmKey(msg)
 	case modeDiff:
 		return m.handleDiffKey(msg)
+	case modePicker:
+		return m.handlePickerKey(msg)
 	default:
 		return m.handleLedgerKey(msg)
+	}
+}
+
+// handleEditMsg acts on resolved editor preferences: autolaunch the default
+// when configured (and not forcing the picker), else open the picker overlay.
+func (m Model) handleEditMsg(msg editMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.status, m.statusErr = msg.err.Error(), true
+		return m, nil
+	}
+	m.pickerProject, m.pickerBranch, m.pickerPath = msg.project, msg.branch, msg.path
+	if !msg.forcePicker && msg.autolaunch && msg.defaultID != "" {
+		if i, ok := ide.Find(msg.ides, msg.defaultID); ok {
+			return m, m.launchIDECmd(i, msg.path, msg.branch)
+		}
+	}
+	m.picker = picker.New(msg.ides, msg.defaultID)
+	m.mode = modePicker
+	m.status, m.statusErr = "", false
+	return m, nil
+}
+
+// handlePickerKey forwards a key to the picker overlay; when the picker reports
+// a choice it returns to the ledger and acts on it (launch / persist default).
+func (m Model) handlePickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	np, _ := m.picker.Update(msg)
+	m.picker = np.(picker.Model)
+	if !m.picker.Done() {
+		return m, nil
+	}
+	m.mode = modeLedger
+	res := m.picker.Result()
+	switch res.Action {
+	case picker.Launch:
+		return m, m.launchIDECmd(res.IDE, m.pickerPath, m.pickerBranch)
+	case picker.SetDefault:
+		return m, m.persistDefaultCmd(m.pickerProject, res.IDE, false)
+	case picker.SetDefaultAutolaunch:
+		return m, m.persistDefaultCmd(m.pickerProject, res.IDE, true)
+	default: // picker.Cancel
+		m.status, m.statusErr = "cancelled", false
+		return m, nil
 	}
 }
 
@@ -477,9 +611,15 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Focus()
 		m.status, m.statusErr = "new workspace in "+proj, false
 		return m, textinput.Blink
-	case "o":
+	case "e":
+		// Edit: autolaunch the project default when set, else open the picker.
 		if r, ok := m.currentWorkspace(); ok {
-			return m, m.openEditorCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
+			return m, m.startEditCmd(r.view.Worktree.Project, r.view.Worktree.Branch, false)
+		}
+	case "o":
+		// Configure editor: always open the picker (set default / autolaunch).
+		if r, ok := m.currentWorkspace(); ok {
+			return m, m.startEditCmd(r.view.Worktree.Project, r.view.Worktree.Branch, true)
 		}
 	case "t":
 		if !m.inTmux {

@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/stack-bound/workflow/internal/ide"
 	"github.com/stack-bound/workflow/internal/launcher"
 	"github.com/stack-bound/workflow/internal/status"
 	"github.com/stack-bound/workflow/internal/tmux"
@@ -200,31 +201,43 @@ func newPathCmd() *cobra.Command {
 
 func newOpenCmd() *cobra.Command {
 	var project string
-	var editor bool
 	cmd := &cobra.Command{
 		Use:   "open <branch>",
-		Short: "Open a workspace: jump to its tmux window, or open it in your editor",
+		Short: "Open a workspace: jump to its tmux window, or launch your editor",
 		Long: "Open a workspace. Inside tmux this jumps to the workspace's window " +
-			"(creating it if needed); otherwise it opens the worktree in your editor. " +
-			"Pass --editor to force the editor even inside tmux.",
+			"(creating it if needed); otherwise it launches the workspace's default " +
+			"editor. Use `wf edit` to choose an editor interactively.",
 		Args: cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			m, g, err := manager()
 			if err != nil {
 				return err
 			}
-			path, err := m.Path(args[0], project)
+			wt, err := m.Resolve(args[0], project)
 			if err != nil {
 				return err
 			}
-			if tmux.Available() && !editor {
-				return launcher.NewTmux().Open(path, launcher.IdleName(g, args[0]))
+			if tmux.Available() {
+				return launcher.NewTmux().Open(wt.Path, launcher.IdleName(g, args[0]))
 			}
-			return launcher.NewUniversal(g).OpenInEditor(path)
+			// No tmux: launch the resolved default editor (repo default, else
+			// global default, else the first detected editor).
+			ides := ide.Detect(g)
+			defaultID, _, _ := m.ProjectIDEPrefs(wt.Project)
+			if defaultID == "" {
+				defaultID = g.DefaultIDE
+			}
+			i, ok := ide.Find(ides, defaultID)
+			if !ok {
+				if len(ides) == 0 {
+					return fmt.Errorf("no editor detected; add one under `ides:` in config (see: wf edit --list)")
+				}
+				i = ides[0]
+			}
+			return launchIDE(cmd, i, wt.Path)
 		},
 	}
 	cmd.Flags().StringVarP(&project, "project", "p", "", "scope to a project when the branch is ambiguous")
-	cmd.Flags().BoolVar(&editor, "editor", false, "open in the editor even inside tmux")
 	return cmd
 }
 

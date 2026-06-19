@@ -284,6 +284,43 @@ func TestRenderRowSelectionAndKinds(t *testing.T) {
 	}
 }
 
+// overlayBox must never drop box rows: a box taller than the base content (a
+// short ledger) used to lose its bottom rows — including the box's bottom border
+// — because rows past the end of the base were skipped. Every box line should
+// survive into the composited output.
+func TestOverlayBoxKeepsEveryBoxLine(t *testing.T) {
+	base := "title\n\nrow1\nrow2"         // 4 short lines, no room for the box
+	box := "A\nB\nC\nD\nE\nF\nG\nH\nI\nJ" // 10-line box
+	out := overlayBox(base, box, 40, 6)   // height 6 < box height 10
+	for _, want := range strings.Split(box, "\n") {
+		if !strings.Contains(out, want) {
+			t.Errorf("overlay dropped box line %q:\n%s", want, out)
+		}
+	}
+}
+
+// With the real picker box over a short ledger, the rendered picker view keeps
+// the whole box, including its bottom border row.
+func TestViewPickerNotClipped(t *testing.T) {
+	m := readyModel(t)
+	m, _ = step(m, editMsg{project: "alpha", branch: "feat-1", path: "/wt/feat-1", ides: sampleIDEs()})
+	if m.mode != modePicker {
+		t.Fatalf("setup: mode = %v, want picker", m.mode)
+	}
+	// Force a tall terminal but a short ledger so the box would overflow the
+	// natural content height if rows past the base were dropped.
+	m.height = 40
+	out := m.View()
+	box := strings.Split(m.picker.Box(), "\n")
+	bottom := box[len(box)-1] // rounded border bottom row
+	if strings.TrimSpace(bottom) == "" {
+		t.Fatalf("expected a non-empty box bottom border, got %q", bottom)
+	}
+	if !strings.Contains(out, strings.TrimSpace(bottom)) {
+		t.Errorf("picker view clipped the box bottom border %q:\n%s", bottom, out)
+	}
+}
+
 func TestBodyHeightClamp(t *testing.T) {
 	m := New(nil, nil)
 	m.height = 0

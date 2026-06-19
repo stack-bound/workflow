@@ -5,12 +5,36 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stack-bound/workflow/internal/config"
 	"github.com/stack-bound/workflow/internal/git"
+	"github.com/stack-bound/workflow/internal/ide"
 	"gopkg.in/yaml.v3"
 )
+
+// resolveConfigEditor picks the command to open a single config file: $VISUAL or
+// $EDITOR when set, else a detected terminal editor (preferred for one file),
+// else any detected editor, else a plain "vi".
+func resolveConfigEditor(g *config.Global) []string {
+	if v := os.Getenv("VISUAL"); v != "" {
+		return strings.Fields(v)
+	}
+	if v := os.Getenv("EDITOR"); v != "" {
+		return strings.Fields(v)
+	}
+	ides := ide.Detect(g)
+	for _, i := range ides {
+		if !i.GUI {
+			return i.Exec
+		}
+	}
+	if len(ides) > 0 {
+		return ides[0].Exec
+	}
+	return []string{"vi"}
+}
 
 func newInitCmd() *cobra.Command {
 	var force bool
@@ -172,7 +196,7 @@ func newConfigShowCmd() *cobra.Command {
 				return err
 			}
 			fmt.Print(string(data))
-			fmt.Printf("# resolved editor: %s\n", g.ResolveEditor())
+			fmt.Printf("# config editor: %s\n", strings.Join(resolveConfigEditor(g), " "))
 			return nil
 		},
 	}
@@ -199,8 +223,8 @@ func newConfigEditCmd() *cobra.Command {
 					return err
 				}
 			}
-			editor := g.ResolveEditor()
-			c := exec.Command("sh", "-c", fmt.Sprintf("%s %q", editor, p))
+			argv := resolveConfigEditor(g)
+			c := exec.Command(argv[0], append(argv[1:], p)...)
 			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 			return c.Run()
 		},

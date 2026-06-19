@@ -62,13 +62,15 @@ func TestRenderRowWindowOpenMarker(t *testing.T) {
 func TestFooterHelpAdaptsToTmux(t *testing.T) {
 	m := readyModel(t)
 
+	// "t term" (jump to the tmux window) only shows when running inside tmux; the
+	// edit/config keys are always present.
 	m.inTmux = false
-	if f := m.footer(); !strings.Contains(f, "o open") || strings.Contains(f, "t term") {
+	if f := m.footer(); !strings.Contains(f, "e edit") || !strings.Contains(f, "o config") || strings.Contains(f, "t term") {
 		t.Errorf("no-tmux footer = %q", f)
 	}
 
 	m.inTmux = true
-	if f := m.footer(); !strings.Contains(f, "t term") || !strings.Contains(f, "o edit") {
+	if f := m.footer(); !strings.Contains(f, "t term") || !strings.Contains(f, "e edit") {
 		t.Errorf("tmux footer = %q", f)
 	}
 }

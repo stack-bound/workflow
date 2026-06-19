@@ -56,14 +56,14 @@ func TestLoadGlobalMissingReturnsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g == nil || g.Editor != "" || g.DefaultBase != "" {
+	if g == nil || g.DefaultIDE != "" || g.DefaultBase != "" {
 		t.Errorf("expected zero-value Global, got %+v", g)
 	}
 }
 
 func TestSaveLoadGlobalRoundTrip(t *testing.T) {
 	isolate(t)
-	in := &Global{Editor: "code -n", ClipboardCmd: "pbcopy", DefaultBase: "trunk", WorktreeDir: "/wt"}
+	in := &Global{ClipboardCmd: "pbcopy", DefaultBase: "trunk", WorktreeDir: "/wt", DefaultIDE: "goland"}
 	if err := SaveGlobal(in); err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +71,58 @@ func TestSaveLoadGlobalRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *got != *in {
+	if got.ClipboardCmd != in.ClipboardCmd || got.DefaultBase != in.DefaultBase ||
+		got.WorktreeDir != in.WorktreeDir || got.DefaultIDE != in.DefaultIDE {
 		t.Errorf("round trip mismatch: got %+v, want %+v", got, in)
+	}
+}
+
+// A stale "editor" key from before the IDE model is silently ignored on load
+// (the field no longer exists) and is dropped the next time we save.
+func TestLoadGlobalIgnoresStaleEditorKey(t *testing.T) {
+	root := isolate(t)
+	if _, err := Dir(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, appDir, "config.yaml")
+	if err := os.WriteFile(path, []byte("editor: vim\ndefault_base: trunk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LoadGlobal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.DefaultBase != "trunk" {
+		t.Errorf("default_base = %q, want trunk", g.DefaultBase)
+	}
+	if err := SaveGlobal(g); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "editor:") {
+		t.Errorf("stale editor key survived a save: %s", data)
+	}
+}
+
+func TestLoadGlobalCustomIDEs(t *testing.T) {
+	root := isolate(t)
+	if _, err := Dir(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, appDir, "config.yaml")
+	yamlText := "ides:\n  - id: myed\n    name: My Editor\n    cmd: myed --flag\n    gui: true\n"
+	if err := os.WriteFile(path, []byte(yamlText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	g, err := LoadGlobal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.IDEs) != 1 || g.IDEs[0].ID != "myed" || g.IDEs[0].Cmd != "myed --flag" || !g.IDEs[0].GUI {
+		t.Errorf("custom ides parsed wrong: %+v", g.IDEs)
 	}
 }
 
@@ -137,39 +187,72 @@ func TestLoadRepoParseError(t *testing.T) {
 	}
 }
 
-func TestResolveEditor(t *testing.T) {
-	t.Run("config wins", func(t *testing.T) {
-		t.Setenv("VISUAL", "vis")
-		t.Setenv("EDITOR", "ed")
-		g := &Global{Editor: "myeditor"}
-		if got := g.ResolveEditor(); got != "myeditor" {
-			t.Errorf("got %q, want myeditor", got)
-		}
-	})
-	t.Run("VISUAL over EDITOR", func(t *testing.T) {
-		t.Setenv("VISUAL", "vis")
-		t.Setenv("EDITOR", "ed")
-		g := &Global{}
-		if got := g.ResolveEditor(); got != "vis" {
-			t.Errorf("got %q, want vis", got)
-		}
-	})
-	t.Run("EDITOR when no VISUAL", func(t *testing.T) {
-		t.Setenv("VISUAL", "")
-		t.Setenv("EDITOR", "ed")
-		g := &Global{}
-		if got := g.ResolveEditor(); got != "ed" {
-			t.Errorf("got %q, want ed", got)
-		}
-	})
-	t.Run("fallback never empty", func(t *testing.T) {
-		t.Setenv("VISUAL", "")
-		t.Setenv("EDITOR", "")
-		g := &Global{}
-		if got := g.ResolveEditor(); got == "" {
-			t.Error("ResolveEditor fallback returned empty")
-		}
-	})
+func TestSetRepoIDECreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := SetRepoIDE(dir, "goland", true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRepo(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.DefaultIDE != "goland" || !r.Autolaunch {
+		t.Errorf("after create: %+v", r)
+	}
+}
+
+func TestSetRepoIDEPreservesExistingContent(t *testing.T) {
+	dir := t.TempDir()
+	// A hand-written config with a comment and unrelated settings.
+	yamlText := "# my repo config\nbase: develop\nsetup:\n  - npm install\n"
+	if err := os.WriteFile(RepoConfigPath(dir), []byte(yamlText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRepoIDE(dir, "code", false); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRepo(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Base != "develop" || len(r.Setup) != 1 || r.Setup[0] != "npm install" {
+		t.Errorf("existing settings lost: %+v", r)
+	}
+	if r.DefaultIDE != "code" || r.Autolaunch {
+		t.Errorf("ide settings wrong: %+v", r)
+	}
+	data, err := os.ReadFile(RepoConfigPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# my repo config") {
+		t.Errorf("comment did not survive: %s", data)
+	}
+}
+
+func TestSetRepoIDEUpdatesInPlace(t *testing.T) {
+	dir := t.TempDir()
+	if err := SetRepoIDE(dir, "code", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetRepoIDE(dir, "goland", false); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRepo(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.DefaultIDE != "goland" || r.Autolaunch {
+		t.Errorf("update in place wrong: %+v", r)
+	}
+	data, err := os.ReadFile(RepoConfigPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The key should appear exactly once, not be duplicated on update.
+	if n := strings.Count(string(data), "default_ide:"); n != 1 {
+		t.Errorf("default_ide appears %d times, want 1: %s", n, data)
+	}
 }
 
 func TestExampleRepoYAMLIsValid(t *testing.T) {
