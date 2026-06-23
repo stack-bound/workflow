@@ -44,18 +44,22 @@ const (
 	modePicker
 )
 
-// rowKind distinguishes a project header from a workspace line.
+// rowKind distinguishes the three line kinds in a project block: a project
+// header (name + path, the add target), the base/main checkout row, and a
+// worktree line.
 type rowKind int
 
 const (
 	rowProject rowKind = iota
+	rowMain
 	rowWorkspace
 )
 
-// row is one rendered line in the ledger: a project header or a workspace.
-// A project row doubles as the project's base-checkout row — main carries the
-// branch the root is on and its dirty state, so the base branch can be launched
-// (tmux/editor) and its uncommitted diff viewed without a worktree.
+// row is one rendered line in the ledger. A project block is a header
+// (rowProject) → its base checkout (rowMain) → its worktrees (rowWorkspace).
+// The rowMain row carries the branch the root is on and its dirty state, so the
+// base branch can be launched (tmux/editor) and its uncommitted diff viewed
+// without a worktree — it is the target of the base-launch keys.
 type row struct {
 	kind        rowKind
 	project     string
@@ -660,8 +664,8 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.diffBranch = r.view.Worktree.Branch
 			return m, m.diffCmd(m.diffProject, m.diffBranch)
 		}
-		// On a project (base) row, show the root checkout's uncommitted diff.
-		if r, ok := m.current(); ok && r.kind == rowProject {
+		// On the base (main) row, show the root checkout's uncommitted diff.
+		if r, ok := m.currentMain(); ok {
 			m.diffProject = r.project
 			m.diffBranch = r.main.Branch
 			return m, m.mainDiffCmd(r.project, r.main.Branch)
@@ -681,11 +685,11 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case "e":
 		// Edit: autolaunch the project default when set, else open the picker.
-		// On a project row this opens the base checkout at the project root.
+		// On the base (main) row this opens the base checkout at the project root.
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.startEditCmd(r.view.Worktree.Project, r.view.Worktree.Branch, false)
 		}
-		if r, ok := m.current(); ok && r.kind == rowProject {
+		if r, ok := m.currentMain(); ok {
 			return m, m.startEditPathCmd(r.project, r.main.Branch, r.projectPath, false)
 		}
 	case "o":
@@ -693,7 +697,7 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.startEditCmd(r.view.Worktree.Project, r.view.Worktree.Branch, true)
 		}
-		if r, ok := m.current(); ok && r.kind == rowProject {
+		if r, ok := m.currentMain(); ok {
 			return m, m.startEditPathCmd(r.project, r.main.Branch, r.projectPath, true)
 		}
 	case "t":
@@ -704,29 +708,29 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.openWindowCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
 		}
-		// On a project row, open a tmux window on the base checkout at the root.
-		if r, ok := m.current(); ok && r.kind == rowProject {
+		// On the base (main) row, open a tmux window on the base checkout at the root.
+		if r, ok := m.currentMain(); ok {
 			return m, m.openMainWindowCmd(r.project, r.projectPath, r.main.Branch)
 		}
 	case "c":
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.copyCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
 		}
-		if r, ok := m.current(); ok && r.kind == rowProject {
+		if r, ok := m.currentMain(); ok {
 			return m, m.copyPathCmd(r.projectPath, r.project)
 		}
 	case "m":
 		if r, ok := m.currentWorkspace(); ok {
 			m.confirm = confirmFor("merge", r.view)
 			m.mode = modeConfirm
-		} else if r, ok := m.current(); ok && r.kind == rowProject {
+		} else if _, ok := m.currentMain(); ok {
 			m.status, m.statusErr = "merge applies to a worktree, not the base checkout", true
 		}
 	case "x":
 		if r, ok := m.currentWorkspace(); ok {
 			m.confirm = confirmFor("rm", r.view)
 			m.mode = modeConfirm
-		} else if r, ok := m.current(); ok && r.kind == rowProject {
+		} else if _, ok := m.currentMain(); ok {
 			m.status, m.statusErr = "remove applies to a worktree, not the base checkout", true
 		}
 	}
@@ -797,13 +801,21 @@ func (m *Model) setRows(projects []workspace.ProjectView) {
 	var rows []row
 	for i := range projects {
 		pv := projects[i]
-		rows = append(rows, row{
-			kind:        rowProject,
-			project:     pv.Project.Name,
-			projectPath: pv.Project.Path,
-			wsCount:     len(pv.Workspaces),
-			main:        pv.Main,
-		})
+		rows = append(rows,
+			row{
+				kind:        rowProject,
+				project:     pv.Project.Name,
+				projectPath: pv.Project.Path,
+				wsCount:     len(pv.Workspaces),
+				main:        pv.Main,
+			},
+			row{
+				kind:        rowMain,
+				project:     pv.Project.Name,
+				projectPath: pv.Project.Path,
+				main:        pv.Main,
+			},
+		)
 		for j := range pv.Workspaces {
 			v := &pv.Workspaces[j]
 			rows = append(rows, row{kind: rowWorkspace, project: pv.Project.Name, view: v})
@@ -853,6 +865,16 @@ func (m Model) currentWorkspace() (row, bool) {
 	return row{}, false
 }
 
+// currentMain returns the selected row when it is a base/main checkout — the
+// target of the base-launch keys (t/e/o/enter/c).
+func (m Model) currentMain() (row, bool) {
+	r, ok := m.current()
+	if ok && r.kind == rowMain {
+		return r, true
+	}
+	return row{}, false
+}
+
 // currentProject is the project of the selected row (header or workspace).
 func (m Model) currentProject() string {
 	if r, ok := m.current(); ok {
@@ -869,8 +891,15 @@ func (m Model) selectionKey() string {
 }
 
 func rowKey(r row) string {
-	if r.kind == rowWorkspace && r.view != nil {
-		return "w\x00" + r.view.Worktree.Project + "\x00" + r.view.Worktree.Branch
+	switch r.kind {
+	case rowWorkspace:
+		if r.view != nil {
+			return "w\x00" + r.view.Worktree.Project + "\x00" + r.view.Worktree.Branch
+		}
+		return "w\x00" + r.project
+	case rowMain:
+		return "m\x00" + r.project
+	default:
+		return "p\x00" + r.project
 	}
-	return "p\x00" + r.project
 }

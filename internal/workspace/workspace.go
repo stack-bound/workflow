@@ -160,6 +160,10 @@ func mainCheckoutFor(path string) MainCheckout {
 		mc.Err = fmt.Errorf("project path missing")
 		return mc
 	}
+	if !git.IsRepo(path) {
+		mc.Err = fmt.Errorf("not a git repository")
+		return mc
+	}
 	branch, err := git.CurrentBranch(path)
 	if err != nil {
 		mc.Err = err

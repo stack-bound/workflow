@@ -162,3 +162,19 @@ func TestMainCheckoutMissingPath(t *testing.T) {
 		t.Errorf("missing path should have no branch, got %q", mc.Branch)
 	}
 }
+
+// TestMainCheckoutNotARepo asserts a project root that exists but is not a git
+// repository degrades to a concise, single-line error (not a raw git stderr
+// dump) so the dashboard's base row stays clean.
+func TestMainCheckoutNotARepo(t *testing.T) {
+	mc := mainCheckoutFor(t.TempDir()) // an empty dir, no .git
+	if mc.Err == nil {
+		t.Fatal("a non-repo root should populate Err")
+	}
+	if got := mc.Err.Error(); got != "not a git repository" {
+		t.Errorf("non-repo error = %q, want %q", got, "not a git repository")
+	}
+	if mc.Branch != "" {
+		t.Errorf("non-repo root should have no branch, got %q", mc.Branch)
+	}
+}

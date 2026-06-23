@@ -23,7 +23,7 @@ func sampleIDEs() []ide.IDE {
 func TestEditKeysDispatchCommand(t *testing.T) {
 	for _, k := range []string{"e", "o"} {
 		m := readyModel(t)
-		m.cursor = 1 // alpha/feat-1
+		m.cursor = 2 // alpha/feat-1
 		m2, cmd := step(m, runeKey(k))
 		if cmd == nil {
 			t.Errorf("%q should dispatch a command", k)
@@ -34,15 +34,15 @@ func TestEditKeysDispatchCommand(t *testing.T) {
 	}
 }
 
-// e / o on a project (base) row dispatch the edit command for the base checkout
+// e / o on the base (main) row dispatch the edit command for the base checkout
 // at the project root, staying on the ledger until the editMsg arrives.
-func TestEditKeyOnProjectRowOpensBase(t *testing.T) {
+func TestEditKeyOnMainRowOpensBase(t *testing.T) {
 	for _, k := range []string{"e", "o"} {
 		m := readyModel(t)
-		m.cursor = 0 // alpha (base) row
+		m.cursor = 1 // alpha base (main) row
 		m2, cmd := step(m, runeKey(k))
 		if cmd == nil {
-			t.Errorf("%q on a project row should dispatch a base-edit command", k)
+			t.Errorf("%q on the base row should dispatch a base-edit command", k)
 		}
 		if m2.mode != modeLedger {
 			t.Errorf("%q should not change mode synchronously, got %v", k, m2.mode)

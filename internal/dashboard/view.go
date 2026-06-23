@@ -78,14 +78,6 @@ const (
 // trailing space (2). columnHeader pads by this so "BRANCH" sits over the names.
 const wsLeadWidth = 9
 
-// Project (base) row column widths: the name pads to projNameCol so each
-// project's base summary starts at the same column, and the base branch pads to
-// baseRefCol so the clean/dirty word lines up across projects.
-const (
-	projNameCol = 16
-	baseRefCol  = 16
-)
-
 // bodyHeight is the number of rows available for the diff viewport (title +
 // blank above, help + scroll below).
 func (m Model) bodyHeight() int {
@@ -180,8 +172,14 @@ func (m Model) viewLedger() string {
 	}
 
 	b.WriteString(columnHeader())
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 	for i, r := range m.rows {
+		// A blank line before each project block (except the first) spaces the
+		// blocks apart so empty projects aren't stacked. This is a render concern,
+		// not a row, so cursor navigation skips straight between real rows.
+		if r.kind == rowProject && i != 0 {
+			b.WriteString("\n")
+		}
 		b.WriteString(m.renderRow(i, r))
 		b.WriteString("\n")
 	}
@@ -294,20 +292,53 @@ func agentCell(l config.Look, colored bool) string {
 	return out
 }
 
-// renderRow dispatches a flattened ledger row to the project (base) or worktree
-// renderer, applying the cursor and the live tmux-open indicator.
+// renderRow dispatches a flattened ledger row to the header, base (main), or
+// worktree renderer, applying the cursor and the live tmux-open indicator.
 func (m Model) renderRow(i int, r row) string {
-	if r.kind == rowProject {
+	switch r.kind {
+	case rowProject:
 		return m.renderProjectRow(i, r)
+	case rowMain:
+		return m.renderMainRow(i, r)
+	default:
+		return m.renderWorkspaceRow(i, r)
 	}
-	return m.renderWorkspaceRow(i, r)
 }
 
-// renderProjectRow draws a project's section/base row: an accent bar, the
-// project name, the branch the root checkout is on with its clean/dirty state,
-// and the project path dimmed to the right. It is the launch target for the
-// base branch (t/e), so the open indicator shows when its root window is up.
+// renderProjectRow draws a project's header line: an accent bar, the bold
+// project name, and the dim home-shortened project path to the right. It carries
+// no status columns — the base checkout and worktrees render on their own lines
+// below it. The header is the add target (a).
 func (m Model) renderProjectRow(i int, r row) string {
+	selected := i == m.cursor
+
+	cursor := "  "
+	if selected {
+		cursor = "❯ "
+	}
+
+	var left string
+	if selected {
+		left = cursor + selectedStyle.Render("▌ "+r.project)
+	} else {
+		left = cursor + accentBar.Render("▌ ") + projectStyle.Render(r.project)
+	}
+	return left + m.padPath(r.projectPath, left)
+}
+
+// mainMarker is the 3-cell lead marker for a base/main checkout row, occupying
+// the same width as a worktree's tree connector so the columns line up. The
+// diamond distinguishes the base checkout from a worktree child.
+const mainMarker = "◆  "
+
+// renderMainRow draws a project's base/main checkout on its own line, in the
+// same aligned columns as the worktree rows below it: a ◆ marker (where a
+// worktree has its tree connector), a blank agent cell (the base has no agent),
+// then the branch the root is on and its clean/dirty state. The base has no
+// ahead/behind, diff, or base columns, so those are left blank. It is the launch
+// target for the base branch (t/e/o/enter/c), so the open indicator shows when
+// its root window is up.
+func (m Model) renderMainRow(i int, r row) string {
 	selected := i == m.cursor
 	open := m.openPaths[r.projectPath]
 
@@ -318,18 +349,14 @@ func (m Model) renderProjectRow(i int, r row) string {
 
 	var left string
 	if selected {
-		// One highlight over a plain (un-accented) body; the dim path trails to
-		// the right outside the highlight.
-		body := appendOpenPlain("▌ "+pad(r.project, projNameCol)+"  "+mainSummaryPlain(r.main), open)
-		left = cursor + selectedStyle.Render(body)
+		left = cursor + accentBar.Render(mainMarker) + "  " + selectedStyle.Render(mainLine(r.main))
 	} else {
-		left = cursor + accentBar.Render("▌ ") + projectStyle.Render(pad(r.project, projNameCol)) +
-			"  " + mainSummaryStyled(r.main)
-		if open {
-			left += " " + tmuxStyle.Render("▣")
-		}
+		left = cursor + accentBar.Render(mainMarker) + "  " + mainStyled(r.main)
 	}
-	return left + m.padPath(r.projectPath, left)
+	if open {
+		left += " " + tmuxStyle.Render("▣")
+	}
+	return left
 }
 
 // padPath right-aligns the dim, home-shortened project path to the terminal
@@ -383,23 +410,48 @@ func truncatePathLeft(p string, w int) string {
 	return "…" + string(r)
 }
 
-// mainSummaryStyled renders the base checkout's "● <branch> <state>" with accent
-// colours; mainSummaryPlain is the same without colour, for the selected row.
-// The branch is padded so the state word lines up across projects.
-func mainSummaryStyled(mc workspace.MainCheckout) string {
-	if mc.Err != nil || mc.Branch == "" {
-		return errStyle.Render("● " + pad("(no branch)", baseRefCol))
+// mainBranch is the branch label for a base checkout, falling back to an em dash
+// when the root is on no branch (detached) or its status couldn't be read.
+func mainBranch(mc workspace.MainCheckout) string {
+	if mc.Branch == "" {
+		return "—"
 	}
-	mark, word, style := mainState(mc)
-	return style.Render(mark) + " " + baseRefStyle.Render(pad(mc.Branch, baseRefCol)) + style.Render(word)
+	return mc.Branch
 }
 
-func mainSummaryPlain(mc workspace.MainCheckout) string {
-	if mc.Err != nil || mc.Branch == "" {
-		return "● " + pad("(no branch)", baseRefCol)
+// mainLine formats a base checkout's columns WITHOUT accent colours (the layout
+// reference and the body of the selected row). It mirrors a worktree's BRANCH
+// and STATE columns — a state circle, the branch, and the clean/dirty word — but
+// leaves the ahead/behind, diff, and base columns blank, since a base checkout
+// has none of those. A status error degrades to "! <branch> <message>".
+func mainLine(mc workspace.MainCheckout) string {
+	if mc.Err != nil {
+		return "! " + fitBranch(mainBranch(mc)) + firstLine(mc.Err.Error())
 	}
 	mark, word, _ := mainState(mc)
-	return mark + " " + pad(mc.Branch, baseRefCol) + word
+	return mark + " " + fitBranch(mainBranch(mc)) + word
+}
+
+// mainStyled is mainLine with accent colours: the branch in the primary
+// foreground (its identity), the state circle and word in the clean/dirty
+// colour, and a status error in red.
+func mainStyled(mc workspace.MainCheckout) string {
+	if mc.Err != nil {
+		return errStyle.Render("! " + fitBranch(mainBranch(mc)) + firstLine(mc.Err.Error()))
+	}
+	mark, word, style := mainState(mc)
+	return style.Render(mark) + " " +
+		lipgloss.NewStyle().Foreground(cText).Render(fitBranch(mainBranch(mc))) +
+		style.Render(word)
+}
+
+// firstLine collapses a (possibly multi-line) error to its first line, so a raw
+// git stderr dump can never wrap the base row and break the table alignment.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // mainState reports the circle, word, and colour for a base checkout: a peach
@@ -412,8 +464,9 @@ func mainState(mc workspace.MainCheckout) (mark, word string, style lipgloss.Sty
 }
 
 // renderWorkspaceRow draws a worktree as a tree child: a connector (├─/└─), the
-// agent-status cell, the aligned status columns, the live tmux-open indicator,
-// and the worktree directory dimmed to the right. The selected row takes one
+// agent-status cell, the aligned status columns, and the live tmux-open
+// indicator. The directory path is intentionally omitted (it lives on the
+// project header) to keep the row uncluttered. The selected row takes one
 // highlight over the plain layout; every other row is accent-coloured field by
 // field so a colour flags a status, not the whole line.
 func (m Model) renderWorkspaceRow(i int, r row) string {
@@ -437,11 +490,7 @@ func (m Model) renderWorkspaceRow(i int, r row) string {
 	if open {
 		left += " " + tmuxStyle.Render("▣")
 	}
-	path := ""
-	if r.view != nil {
-		path = r.view.Worktree.Path
-	}
-	return left + m.padPath(path, left)
+	return left
 }
 
 // isLastWorkspace reports whether the worktree row at i is the final child of
@@ -458,16 +507,6 @@ func connectorFor(last bool) string {
 		return "└─ "
 	}
 	return "├─ "
-}
-
-// appendOpenPlain appends the colourless tmux-open indicator to a line, for use
-// inside a selection highlight (where the teal glyph would clash with the
-// highlight background).
-func appendOpenPlain(line string, open bool) string {
-	if open {
-		return line + " ▣"
-	}
-	return line
 }
 
 // wsState reports the status circle and word for a workspace, plus the colour
