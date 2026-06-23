@@ -65,8 +65,12 @@ func TestFooterInputAndConfirm(t *testing.T) {
 	m2.cursor = 2                  // alpha/feat-1
 	m2, _ = step(m2, runeKey("x")) // confirm rm
 	out := m2.View()
-	if !strings.Contains(out, "y/n") || !strings.Contains(out, "feat-1") {
-		t.Errorf("confirm footer missing prompt:\n%s", out)
+	// The confirmation is a centered popup card: its title, the branch, and the
+	// y/n help all render in the box over the ledger.
+	for _, want := range []string{"Remove workspace", "feat-1", "y confirm"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("confirm popup missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -79,41 +83,55 @@ func TestConfirmPrompt(t *testing.T) {
 		return &v
 	}
 
-	t.Run("merge is a plain caution", func(t *testing.T) {
-		got := confirmFor("merge", mkView(true, 3, 9, 1, nil)).prompt()
-		if !strings.Contains(got, "Merge alpha/feat-1?") || !strings.Contains(got, "[y/n]") {
-			t.Errorf("merge prompt = %q", got)
+	t.Run("merge is a peach caution", func(t *testing.T) {
+		c := confirmFor("merge", mkView(true, 3, 9, 1, nil))
+		if got := c.message(); !strings.Contains(got, "Merge alpha/feat-1 into master") {
+			t.Errorf("merge message = %q", got)
+		}
+		if c.title() != "Merge workspace" {
+			t.Errorf("merge title = %q", c.title())
+		}
+		if c.accent() != cPeach {
+			t.Errorf("merge accent = %v, want peach", c.accent())
 		}
 	})
 
 	t.Run("clean and merged branch is safe", func(t *testing.T) {
-		got := confirmFor("rm", mkView(false, 0, 0, 0, nil)).prompt()
+		c := confirmFor("rm", mkView(false, 0, 0, 0, nil))
+		got := c.message()
 		if !strings.Contains(got, "Safe to remove") || !strings.Contains(got, "vs master") {
-			t.Errorf("safe prompt = %q", got)
+			t.Errorf("safe message = %q", got)
 		}
 		if strings.Contains(got, "discards") {
-			t.Errorf("safe prompt should not warn of discarded work: %q", got)
+			t.Errorf("safe message should not warn of discarded work: %q", got)
+		}
+		if c.accent() != cGreen {
+			t.Errorf("safe accent = %v, want green", c.accent())
 		}
 	})
 
 	t.Run("uncommitted changes warn", func(t *testing.T) {
-		got := confirmFor("rm", mkView(true, 0, 0, 0, nil)).prompt()
+		c := confirmFor("rm", mkView(true, 0, 0, 0, nil))
+		got := c.message()
 		if !strings.Contains(got, "discards uncommitted changes") || !strings.Contains(got, "work will be lost") {
-			t.Errorf("dirty prompt = %q", got)
+			t.Errorf("dirty message = %q", got)
+		}
+		if c.accent() != cRed {
+			t.Errorf("risky accent = %v, want red", c.accent())
 		}
 	})
 
 	t.Run("unmerged commits warn with counts", func(t *testing.T) {
-		got := confirmFor("rm", mkView(false, 2, 9, 1, nil)).prompt()
+		got := confirmFor("rm", mkView(false, 2, 9, 1, nil)).message()
 		if !strings.Contains(got, "2 unmerged commits (+9 -1 vs master)") {
-			t.Errorf("ahead prompt = %q", got)
+			t.Errorf("ahead message = %q", got)
 		}
 	})
 
 	t.Run("single unmerged commit is singular", func(t *testing.T) {
-		got := confirmFor("rm", mkView(false, 1, 4, 0, nil)).prompt()
+		got := confirmFor("rm", mkView(false, 1, 4, 0, nil)).message()
 		if !strings.Contains(got, "1 unmerged commit (") {
-			t.Errorf("singular prompt = %q", got)
+			t.Errorf("singular message = %q", got)
 		}
 	})
 
@@ -125,9 +143,9 @@ func TestConfirmPrompt(t *testing.T) {
 	})
 
 	t.Run("unknown status stays cautious", func(t *testing.T) {
-		got := confirmFor("rm", mkView(false, 0, 0, 0, errors.New("boom"))).prompt()
+		got := confirmFor("rm", mkView(false, 0, 0, 0, errors.New("boom"))).message()
 		if !strings.Contains(got, "couldn't be verified") || strings.Contains(got, "Safe to remove") {
-			t.Errorf("statErr prompt = %q", got)
+			t.Errorf("statErr message = %q", got)
 		}
 	})
 }

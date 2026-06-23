@@ -19,7 +19,7 @@ func newProjectCmd() *cobra.Command {
 		Short:   "Manage registered projects (git repos)",
 		Aliases: []string{"projects", "proj"},
 	}
-	cmd.AddCommand(newProjectAddCmd(), newProjectListCmd(), newProjectRmCmd())
+	cmd.AddCommand(newProjectAddCmd(), newProjectListCmd(), newProjectRenameCmd(), newProjectRmCmd())
 	return cmd
 }
 
@@ -72,6 +72,30 @@ func newProjectListCmd() *cobra.Command {
 			return tw.Flush()
 		},
 	}
+}
+
+func newProjectRenameCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "rename <old> <new>",
+		Aliases: []string{"mv"},
+		Short:   "Rename a registered project (retargets its worktrees)",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			rp, err := config.RegistryPath()
+			if err != nil {
+				return err
+			}
+			err = registry.WithLock(rp, func(s *registry.Store) error {
+				return s.RenameProject(args[0], args[1])
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Renamed project %q to %q\n", args[0], args[1])
+			return nil
+		},
+	}
+	return cmd
 }
 
 func newProjectRmCmd() *cobra.Command {

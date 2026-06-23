@@ -91,6 +91,55 @@ func TestRemoveProjectUnknown(t *testing.T) {
 	}
 }
 
+func TestRenameProjectRetargetsWorktrees(t *testing.T) {
+	s := &Store{}
+	_ = s.AddProject(Project{Name: "old", Path: "/p/old"})
+	_ = s.AddWorktree(Worktree{Project: "old", Path: "/wt/a", Branch: "a"})
+	_ = s.AddWorktree(Worktree{Project: "old", Path: "/wt/b", Branch: "b"})
+	_ = s.AddProject(Project{Name: "other", Path: "/p/other"})
+	_ = s.AddWorktree(Worktree{Project: "other", Path: "/wt/c", Branch: "c"})
+
+	if err := s.RenameProject("old", "new"); err != nil {
+		t.Fatalf("RenameProject: %v", err)
+	}
+	if s.FindProject("old") != nil {
+		t.Error("old name still present after rename")
+	}
+	if p := s.FindProject("new"); p == nil || p.Path != "/p/old" {
+		t.Errorf("renamed project = %+v, want path /p/old", p)
+	}
+	if got := s.WorktreesForProject("new"); len(got) != 2 {
+		t.Errorf("renamed project worktrees = %d, want 2", len(got))
+	}
+	// An unrelated project's worktrees are left alone.
+	if got := s.WorktreesForProject("other"); len(got) != 1 {
+		t.Errorf("other project worktrees = %d, want 1", len(got))
+	}
+}
+
+func TestRenameProjectErrors(t *testing.T) {
+	s := &Store{}
+	_ = s.AddProject(Project{Name: "a", Path: "/p/a"})
+	_ = s.AddProject(Project{Name: "b", Path: "/p/b"})
+
+	if err := s.RenameProject("ghost", "x"); err == nil {
+		t.Error("expected error renaming unknown project")
+	}
+	if err := s.RenameProject("a", "b"); err == nil {
+		t.Error("expected error renaming to a taken name")
+	}
+	if err := s.RenameProject("a", ""); err == nil {
+		t.Error("expected error renaming to an empty name")
+	}
+	// Renaming to the same name is a no-op success.
+	if err := s.RenameProject("a", "a"); err != nil {
+		t.Errorf("rename to same name should be a no-op, got %v", err)
+	}
+	if s.FindProject("a") == nil {
+		t.Error("project a vanished after a no-op rename")
+	}
+}
+
 func TestSaveLoadVersionUpgrade(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "registry.json")
 	// Save into a not-yet-existing nested dir to exercise MkdirAll.

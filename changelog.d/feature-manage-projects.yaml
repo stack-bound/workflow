@@ -1,0 +1,17 @@
+deployment:
+  - ""
+added:
+  - "Manage projects from the dashboard: press enter on a project row to open a centered popup menu and rename the project or delete (unregister) it, with arrow-key navigation and a colour-coded confirmation card that warns when a delete would drop registered workspaces"
+  - "New `wf project rename <old> <new>` command renames a registered project and retargets its worktrees"
+changed:
+  - "Dashboard prompts (add-workspace input, and the merge/remove/delete confirmations) now render as centered, themed popup cards over the ledger — red for destructive actions, green when safe — instead of a plain bottom-line prompt"
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - ""
+security:
+  - ""
+yanked:
+  - ""
