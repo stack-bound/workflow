@@ -267,6 +267,25 @@ func (m *Manager) ProjectRoot(name string) (string, error) {
 	return p.Path, nil
 }
 
+// RenameProject changes a registered project's name, retargeting all of its
+// worktrees so the registry stays consistent. The repo on disk and the
+// project's worktree directories are untouched — only the registry name moves.
+func (m *Manager) RenameProject(oldName, newName string) error {
+	return registry.WithLock(m.registryPath, func(s *registry.Store) error {
+		return s.RenameProject(oldName, newName)
+	})
+}
+
+// RemoveProject unregisters a project. Without force it refuses while the
+// project still has worktrees; with force it also drops those worktree
+// registrations. Like `wf project rm`, it never touches the repo or worktree
+// directories on disk — it only edits the registry.
+func (m *Manager) RemoveProject(name string, force bool) error {
+	return registry.WithLock(m.registryPath, func(s *registry.Store) error {
+		return s.RemoveProject(name, force)
+	})
+}
+
 // ProjectForDir returns the project that owns dir: the worktree containing dir,
 // else the registered project whose tree contains dir. Returns "" when dir
 // belongs to no known project (e.g. an unregistered directory).

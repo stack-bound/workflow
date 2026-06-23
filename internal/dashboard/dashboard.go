@@ -42,6 +42,8 @@ const (
 	modeInput
 	modeConfirm
 	modePicker
+	modeMenu   // a popup action menu (currently the per-project menu)
+	modeRename // text input for renaming a project
 )
 
 // rowKind distinguishes the three line kinds in a project block: a project
@@ -71,9 +73,14 @@ type row struct {
 
 // confirm holds a pending destructive action awaiting y/n.
 type confirm struct {
-	action  string // "merge" | "rm"
+	action  string // "merge" | "rm" | "deleteProject"
 	project string
 	branch  string
+
+	// wsCount is the number of workspaces the action would drop. It is only
+	// meaningful for "deleteProject", where it drives the warning (and forces the
+	// registry removal when non-zero).
+	wsCount int
 
 	// base and the live status snapshot let the "rm" prompt weigh whether the
 	// removal would actually discard work (uncommitted changes or unmerged
@@ -119,6 +126,12 @@ type Model struct {
 
 	input      textinput.Model
 	addProject string
+
+	// menu is the active popup action menu; menuProject is the project it acts
+	// on (the only menu today is the per-project rename/delete menu, reached by
+	// pressing enter on a project header row).
+	menu        menu
+	menuProject string
 
 	confirm confirm
 
@@ -494,7 +507,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.input.Width = msg.Width - 12
+		m.input.Width = m.inputFieldWidth()
 		bodyH := m.bodyHeight()
 		if !m.ready {
 			m.vp = viewport.New(msg.Width, bodyH)
@@ -572,7 +585,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp, cmd = m.vp.Update(msg)
 		return m, cmd
 	}
-	if m.mode == modeInput {
+	if m.mode == modeInput || m.mode == modeRename {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -587,12 +600,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeInput:
 		return m.handleInputKey(msg)
+	case modeRename:
+		return m.handleRenameKey(msg)
 	case modeConfirm:
 		return m.handleConfirmKey(msg)
 	case modeDiff:
 		return m.handleDiffKey(msg)
 	case modePicker:
 		return m.handlePickerKey(msg)
+	case modeMenu:
+		return m.handleMenuKey(msg)
 	default:
 		return m.handleLedgerKey(msg)
 	}
@@ -670,6 +687,12 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.diffBranch = r.main.Branch
 			return m, m.mainDiffCmd(r.project, r.main.Branch)
 		}
+		// On a project header, enter opens the project menu (rename/delete). The
+		// diff alias "d" has nothing to show on a header, so it falls through to
+		// the hint below.
+		if r, ok := m.currentProjectRow(); ok && msg.String() == "enter" {
+			return m.openProjectMenu(r.project)
+		}
 		m.status, m.statusErr = "select a workspace to view its diff", true
 	case "a":
 		proj := m.currentProject()
@@ -679,6 +702,8 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.addProject = proj
 		m.mode = modeInput
+		m.input.Prompt = "branch: "
+		m.input.Width = m.inputFieldWidth()
 		m.input.SetValue("")
 		m.input.Focus()
 		m.status, m.statusErr = "new workspace in "+proj, false
@@ -785,12 +810,146 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "rm":
 			m.status, m.statusErr = "removing "+c.branch+"…", false
 			return m, m.runSelf("removed "+c.branch, "rm", c.branch, "--project", c.project, "--force")
+		case "deleteProject":
+			m.status, m.statusErr = "deleting project "+c.project+"…", false
+			// Force the registry removal when the project still has workspaces, so
+			// the prompt's warning is honoured rather than the engine refusing.
+			return m, m.deleteProjectCmd(c.project, c.wsCount > 0)
 		}
 	case "n", "N", "esc", "q":
 		m.mode = modeLedger
 		m.status, m.statusErr = "cancelled", false
 	}
 	return m, nil
+}
+
+// openProjectMenu pops the per-project action menu (rename/delete) over the
+// ledger for the given project.
+func (m Model) openProjectMenu(project string) (tea.Model, tea.Cmd) {
+	m.menuProject = project
+	m.menu = newProjectMenu(project)
+	m.mode = modeMenu
+	m.status, m.statusErr = "", false
+	return m, nil
+}
+
+// handleMenuKey drives the popup action menu: arrows move between options,
+// enter chooses one, esc/q dismisses it.
+func (m Model) handleMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.menu.move(-1)
+	case "down", "j":
+		m.menu.move(1)
+	case "g", "home":
+		m.menu.cursor = 0
+	case "G", "end":
+		m.menu.move(len(m.menu.items))
+	case "enter":
+		return m.selectMenuItem()
+	case "esc", "q":
+		m.mode = modeLedger
+		m.status, m.statusErr = "", false
+	}
+	return m, nil
+}
+
+// selectMenuItem acts on the highlighted menu option.
+func (m Model) selectMenuItem() (tea.Model, tea.Cmd) {
+	it, ok := m.menu.current()
+	if !ok {
+		m.mode = modeLedger
+		return m, nil
+	}
+	switch it.id {
+	case "rename":
+		return m.startRename()
+	case "delete":
+		return m.startProjectDelete()
+	default:
+		m.mode = modeLedger
+		return m, nil
+	}
+}
+
+// startRename opens the rename text input pre-filled with the project's current
+// name (cursor at the end) so the user can edit it in place.
+func (m Model) startRename() (tea.Model, tea.Cmd) {
+	m.mode = modeRename
+	m.input.Prompt = "name: "
+	m.input.Width = m.inputFieldWidth()
+	m.input.SetValue(m.menuProject)
+	m.input.CursorEnd()
+	m.input.Focus()
+	m.status, m.statusErr = "rename "+m.menuProject, false
+	return m, textinput.Blink
+}
+
+// startProjectDelete opens the y/n confirmation for unregistering a project,
+// snapshotting how many workspaces it still owns so the prompt can warn.
+func (m Model) startProjectDelete() (tea.Model, tea.Cmd) {
+	m.confirm = confirm{
+		action:  "deleteProject",
+		project: m.menuProject,
+		wsCount: m.projectWorkspaceCount(m.menuProject),
+	}
+	m.mode = modeConfirm
+	m.status, m.statusErr = "", false
+	return m, nil
+}
+
+// handleRenameKey commits or cancels a project rename.
+func (m Model) handleRenameKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		newName := strings.TrimSpace(m.input.Value())
+		old := m.menuProject
+		m.mode = modeLedger
+		m.input.Blur()
+		switch newName {
+		case "":
+			m.status, m.statusErr = "rename cancelled (empty name)", true
+			return m, nil
+		case old:
+			m.status, m.statusErr = "name unchanged", false
+			return m, nil
+		}
+		m.status, m.statusErr = "renaming "+old+" → "+newName+"…", false
+		return m, m.renameProjectCmd(old, newName)
+	case tea.KeyEsc:
+		m.mode = modeLedger
+		m.input.Blur()
+		m.status, m.statusErr = "rename cancelled", false
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+// renameProjectCmd renames a project through the engine (a registry edit, so no
+// suspend is needed) and refreshes the ledger.
+func (m Model) renameProjectCmd(old, newName string) tea.Cmd {
+	mgr := m.mgr
+	return func() tea.Msg {
+		if err := mgr.RenameProject(old, newName); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: "renamed " + old + " → " + newName, refresh: true}
+	}
+}
+
+// deleteProjectCmd unregisters a project through the engine and refreshes the
+// ledger. force drops any remaining worktree registrations (the repo on disk is
+// untouched either way).
+func (m Model) deleteProjectCmd(name string, force bool) tea.Cmd {
+	mgr := m.mgr
+	return func() tea.Msg {
+		if err := mgr.RemoveProject(name, force); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: "deleted project " + name, refresh: true}
+	}
 }
 
 // --- row/cursor helpers ---
@@ -873,6 +1032,29 @@ func (m Model) currentMain() (row, bool) {
 		return r, true
 	}
 	return row{}, false
+}
+
+// currentProjectRow returns the selected row when it is a project header — the
+// target of the project menu (enter).
+func (m Model) currentProjectRow() (row, bool) {
+	r, ok := m.current()
+	if ok && r.kind == rowProject {
+		return r, true
+	}
+	return row{}, false
+}
+
+// projectWorkspaceCount counts the worktree rows belonging to a project in the
+// current ledger, so the delete prompt can say how many registrations it would
+// drop.
+func (m Model) projectWorkspaceCount(project string) int {
+	n := 0
+	for _, r := range m.rows {
+		if r.kind == rowWorkspace && r.project == project {
+			n++
+		}
+	}
+	return n
 }
 
 // currentProject is the project of the selected row (header or workspace).

@@ -175,6 +175,37 @@ func (s *Store) RemoveProject(name string, force bool) error {
 	return nil
 }
 
+// RenameProject renames a project, retargeting every worktree that belongs to
+// it so the registry stays internally consistent (worktrees reference their
+// project by name). It errors when the project is unknown, the new name is
+// empty, or the new name is already taken by a different project. Renaming a
+// project to its current name is a no-op success.
+func (s *Store) RenameProject(oldName, newName string) error {
+	if newName == "" {
+		return fmt.Errorf("a new project name is required")
+	}
+	if oldName == newName {
+		return nil
+	}
+	if s.FindProject(oldName) == nil {
+		return fmt.Errorf("no project named %q", oldName)
+	}
+	if s.FindProject(newName) != nil {
+		return fmt.Errorf("project %q already registered", newName)
+	}
+	for i := range s.Projects {
+		if s.Projects[i].Name == oldName {
+			s.Projects[i].Name = newName
+		}
+	}
+	for i := range s.Worktrees {
+		if s.Worktrees[i].Project == oldName {
+			s.Worktrees[i].Project = newName
+		}
+	}
+	return nil
+}
+
 // WorktreesForProject returns all worktrees belonging to a project.
 func (s *Store) WorktreesForProject(name string) []Worktree {
 	var out []Worktree

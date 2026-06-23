@@ -98,6 +98,12 @@ func (m Model) View() string {
 		return m.viewDiff()
 	case modePicker:
 		return m.viewPicker()
+	case modeMenu:
+		return m.viewMenu()
+	case modeInput, modeRename:
+		return m.viewInputPopup()
+	case modeConfirm:
+		return m.viewConfirm()
 	default:
 		return m.viewLedger()
 	}
@@ -106,6 +112,11 @@ func (m Model) View() string {
 // viewPicker draws the IDE chooser as a centered box over the ledger.
 func (m Model) viewPicker() string {
 	return overlayBox(m.viewLedger(), m.picker.Box(), m.width, m.height)
+}
+
+// viewMenu draws the popup action menu as a centered box over the ledger.
+func (m Model) viewMenu() string {
+	return overlayBox(m.viewLedger(), m.menu.Box(), m.width, m.height)
 }
 
 // overlayBox composites box centered over base, replacing the base rows the box
@@ -619,13 +630,10 @@ func (m Model) viewDiff() string {
 // footer renders the status line and a mode-specific help bar (full-width,
 // on a dim surface so the screen reads as framed top and bottom).
 func (m Model) footer() string {
+	// Interactive prompts (input, rename, confirm) render as centered popup cards
+	// over the ledger, so the footer only carries the persistent status message.
 	var status string
-	switch {
-	case m.mode == modeInput:
-		status = m.input.View()
-	case m.mode == modeConfirm:
-		status = m.confirm.prompt()
-	case m.status != "":
+	if m.status != "" {
 		if m.statusErr {
 			status = errStyle.Render(m.status)
 		} else {
@@ -637,8 +645,12 @@ func (m Model) footer() string {
 	switch m.mode {
 	case modeInput:
 		help = "enter create · esc cancel"
+	case modeRename:
+		help = "enter rename · esc cancel"
 	case modeConfirm:
-		help = "y confirm · n cancel"
+		help = "y confirm · n/esc cancel"
+	case modeMenu:
+		help = "↑/↓ move · enter select · esc cancel"
 	case modePicker:
 		help = "↑/↓ move · enter open · d default · a autolaunch · esc cancel"
 	default:
@@ -649,7 +661,7 @@ func (m Model) footer() string {
 		if m.inTmux {
 			editHelp += " · t term"
 		}
-		help = "↑↓ move · enter diff · a add · " + editHelp + " · c copy · m merge · x rm · r refresh · q quit"
+		help = "↑↓ move · enter diff/menu · a add · " + editHelp + " · c copy · m merge · x rm · r refresh · q quit"
 	}
 	return "\n " + status + "\n" + m.helpBar(help)
 }
@@ -667,19 +679,62 @@ func (m Model) helpBar(help string) string {
 	return footerBarStyle.Width(w).Render(content)
 }
 
-// prompt renders the y/n confirmation line for a pending action. Merge is a
-// plain caution; remove first weighs whether the workspace still holds work that
-// deletion would discard — uncommitted changes or commits not yet on base —
-// warning in red when it does (or when status is unknown) and reassuring in
-// green when the branch is safe to drop.
-func (c confirm) prompt() string {
-	if c.action != "rm" {
-		return errStyle.Render(fmt.Sprintf("Merge %s/%s? [y/n]", c.project, c.branch))
+// title is the popup heading for a pending action.
+func (c confirm) title() string {
+	switch c.action {
+	case "deleteProject":
+		return "Delete project · " + c.project
+	case "merge":
+		return "Merge workspace"
+	default: // rm
+		return "Remove workspace"
 	}
-	if risk := c.removeRisk(); risk != "" {
-		return errStyle.Render(fmt.Sprintf("Remove %s/%s? This discards %s — work will be lost. Are you sure? [y/n]", c.project, c.branch, risk))
+}
+
+// accent is the popup's border/title/body colour, chosen by what is at stake: a
+// destructive action that would lose or drop work is red, a safe one green, and
+// a merge a peach caution.
+func (c confirm) accent() lipgloss.Color {
+	switch c.action {
+	case "merge":
+		return cPeach
+	case "deleteProject":
+		if c.wsCount > 0 {
+			return cRed
+		}
+		return cGreen
+	default: // rm
+		if c.removeRisk() != "" {
+			return cRed
+		}
+		return cGreen
 	}
-	return okStyle.Render(fmt.Sprintf("Safe to remove %s/%s: no uncommitted changes, nothing unmerged vs %s. Are you sure? [y/n]", c.project, c.branch, c.base))
+}
+
+// message is the body sentence for a pending action (no styling, no help text —
+// the popup wraps and colours it). For a remove it weighs whether the workspace
+// still holds work that deletion would discard — uncommitted changes or commits
+// not yet on base — warning when it does (or when status is unknown) and
+// reassuring when the branch is safe to drop.
+func (c confirm) message() string {
+	switch c.action {
+	case "deleteProject":
+		if c.wsCount > 0 {
+			noun := "workspace"
+			if c.wsCount > 1 {
+				noun = "workspaces"
+			}
+			return fmt.Sprintf("Unregister %s? This drops %d %s from the registry. The repo on disk is left untouched.", c.project, c.wsCount, noun)
+		}
+		return fmt.Sprintf("Unregister %s? The repo on disk is left untouched.", c.project)
+	case "merge":
+		return fmt.Sprintf("Merge %s/%s into %s, then remove the worktree and delete the branch?", c.project, c.branch, c.base)
+	default: // rm
+		if risk := c.removeRisk(); risk != "" {
+			return fmt.Sprintf("Removing %s/%s discards %s — work will be lost. Are you sure?", c.project, c.branch, risk)
+		}
+		return fmt.Sprintf("Safe to remove %s/%s: no uncommitted changes, nothing unmerged vs %s. Are you sure?", c.project, c.branch, c.base)
+	}
 }
 
 // removeRisk describes the work that removing this workspace would lose, or ""

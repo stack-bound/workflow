@@ -60,6 +60,27 @@ When asked to record changelog changes for a change, use the `/clog` skill (e.g.
 
 `.github/workflows/release.yaml` triggers **only on pushed `v*` tags** and never creates tags itself. To cut a release: run `clog release` (merges fragments, updates `CHANGELOG.md`), set `VERSION` to the new version, commit, then `git tag vX.Y.Z` and `git push origin vX.Y.Z`. CI verifies the `VERSION` file matches the tag and fails the release if they differ.
 
+## UI / look & feel — everything is a polished lipgloss surface
+
+The dashboard is a styled TUI and **every** interaction must look deliberate and
+nice. I care about this — do not ship a bare, unstyled prompt.
+
+- **All interactive prompts are centered popup overlays**, never bottom-line
+  text. Text input (add workspace, rename project), confirmations
+  (merge/remove/delete), and action menus each render as a **bordered, themed box
+  floating over the ledger** — see `overlayBox` + `popupBox` and the `menu` /
+  `picker` components in `internal/dashboard`.
+- **Use the Catppuccin theme** (the `c*` colour vars in `view.go`), not bare ANSI
+  indices. Borders and titles carry **semantic colour**: mauve for neutral input,
+  red for destructive confirmations, green when an action is safe, peach for
+  caution.
+- **Reuse the shared popup primitives** (`popupBox`, `menu`, `picker`) rather than
+  inventing one-off layouts; a new prompt should drop straight into the same
+  overlay system, with a title, an aligned/wrapped body, and a help line.
+- When you add any new surface, match this polish and **verify it through the
+  isolated-tmux PTY smoke check** below (capture-pane to confirm it actually
+  looks right, not just that it compiles).
+
 ## Testing the TUI / driving tmux — ALWAYS use an isolated server, never the default one
 
 The dashboard (`internal/dashboard`) is a Bubble Tea TUI, so end-to-end testing
