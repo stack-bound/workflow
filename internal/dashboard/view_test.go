@@ -21,7 +21,7 @@ func TestViewLoadingBeforeReady(t *testing.T) {
 func TestViewLedgerRendersRows(t *testing.T) {
 	m := readyModel(t)
 	out := m.View()
-	for _, want := range []string{"WorkFlow — dashboard", "alpha", "feat-1", "beta"} {
+	for _, want := range []string{"WorkFlow", "alpha", "feat-1", "beta"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ledger view missing %q:\n%s", want, out)
 		}
@@ -195,12 +195,12 @@ func TestBehindAheadOrder(t *testing.T) {
 	}
 }
 
-// TestLedgerHeaderAndLegend asserts the new column headings and the glyph key
-// render into the ledger view so the numbers and symbols are self-explaining.
+// TestLedgerHeaderAndLegend asserts the column headings and the glyph key render
+// into the ledger view so the numbers and symbols are self-explaining.
 func TestLedgerHeaderAndLegend(t *testing.T) {
 	out := readyModel(t).View()
 	for _, want := range []string{
-		"branch", "state", "behind|ahead", "diff", "base", // column headings
+		"BRANCH", "STATE", "± LINES", "BASE", // column headings
 		"● active", "○ clean", "▣ tmux open", // glyph key
 		"↓behind|↑ahead", "+added", "-removed", "* uncommitted", // column key
 	} {
@@ -218,9 +218,9 @@ func TestLedgerHeaderAlignsWithRow(t *testing.T) {
 	m := readyModel(t)
 	m.cursor = 0                     // project selected → the workspace rows render unselected (accent-styled)
 	row := m.renderRow(1, m.rows[1]) // alpha/feat-1
-	h := ledgerHeader()
+	h := columnHeader()
 
-	hCol := lipgloss.Width(h[:strings.Index(h, "branch")])
+	hCol := lipgloss.Width(h[:strings.Index(h, "BRANCH")])
 	rCol := lipgloss.Width(row[:strings.Index(row, "feat-1")])
 	if hCol != rCol {
 		t.Errorf("branch heading at col %d, branch name at col %d:\nhdr: %q\nrow: %q", hCol, rCol, h, row)
@@ -263,8 +263,8 @@ func TestLongBranchKeepsColumnsAligned(t *testing.T) {
 	m.cursor = 0 // project header selected → the workspace renders unselected
 
 	row := m.renderRow(1, m.rows[1])
-	h := ledgerHeader()
-	hCol := lipgloss.Width(h[:strings.Index(h, "state")])
+	h := columnHeader()
+	hCol := lipgloss.Width(h[:strings.Index(h, "STATE")])
 	rCol := lipgloss.Width(row[:strings.Index(row, "clean")])
 	if hCol != rCol {
 		t.Errorf("state heading at col %d, state value at col %d:\nhdr: %q\nrow: %q", hCol, rCol, h, row)

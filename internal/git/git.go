@@ -123,6 +123,16 @@ func CurrentBranch(dir string) (string, error) {
 	return run(dir, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
+// Dirty reports whether dir's working tree has uncommitted changes, including
+// untracked files (any `git status --porcelain` output).
+func Dirty(dir string) (bool, error) {
+	out, err := run(dir, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
+}
+
 // WorktreeAdd creates a worktree at path. When newBranch is true a new branch
 // is created from base; otherwise the existing branch is checked out.
 func WorktreeAdd(repo, path, branch, base string, newBranch bool) error {

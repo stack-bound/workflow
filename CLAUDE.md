@@ -60,20 +60,40 @@ When asked to record changelog changes for a change, use the `/clog` skill (e.g.
 
 `.github/workflows/release.yaml` triggers **only on pushed `v*` tags** and never creates tags itself. To cut a release: run `clog release` (merges fragments, updates `CHANGELOG.md`), set `VERSION` to the new version, commit, then `git tag vX.Y.Z` and `git push origin vX.Y.Z`. CI verifies the `VERSION` file matches the tag and fails the release if they differ.
 
-## Testing the TUI / driving tmux — use an isolated server, never the default one
+## Testing the TUI / driving tmux — ALWAYS use an isolated server, never the default one
 
 The dashboard (`internal/dashboard`) is a Bubble Tea TUI, so end-to-end testing
-needs a real PTY. tmux can provide one, **but**:
+needs a real PTY, and `wf` itself drives tmux. **Every** tmux interaction during
+testing — whether you run the `tmux` CLI *or* the `wf` binary — must be confined
+to a private server. This is non-negotiable:
 
+- **`wf` is itself a tmux guest: running it inherits `$TMUX`.** Any `wf`
+  invocation that touches tmux acts on **whatever `$TMUX` points at**, so running
+  `wf` from a tool shell (where `$TMUX` is the developer's interactive session)
+  creates/kills windows **on the default server** — the live session. The
+  offenders: `wf add` gives every new workspace a **detached window**; `wf open`,
+  `wf resurrect`, `wf close`, and the dashboard `t` key create/select/kill
+  windows; `merge`/`rm` close them. So when you run `wf` in any test or sandbox,
+  **either**:
+  - `unset TMUX` (or `env -u TMUX …`) when you do **not** need tmux — e.g.
+    `wf add`, `wf list`, `wf path`, building the ledger. With `$TMUX` unset, `wf`
+    behaves as "not in tmux" and creates no windows; **or**
+  - run `wf` **inside** the private server so its `$TMUX` points there:
+    `tmux -L wf_test new-session -d "wf dashboard"` (the dashboard, `t`, `add`,
+    etc. then all land on `wf_test`).
+  - **Never** run a tmux-touching `wf` command with the inherited `$TMUX` still
+    set — that is exactly how stray windows end up in the user's session.
 - **Always use a private tmux server via a dedicated socket: `tmux -L wf_test …`**
-  (or `-S /tmp/wf_test.sock`). Commands here can inherit the developer's `$TMUX`,
-  so an unsocketed `tmux new-session` lands on the *default server* — the one
-  running the interactive session — and disrupts it.
+  (or `-S /tmp/wf_test.sock`). An unsocketed `tmux new-session` inherits `$TMUX`
+  and lands on the *default server* — the one running the interactive session.
 - **Only ever `tmux -L wf_test kill-server`** to clean up. **Never** run
-  `tmux kill-server` (kills every server, including the user's) and never
-  `kill-session` on the default server.
-- Unset/override `$TMUX` for the test command if in doubt. Capture rendered
-  output with `tmux -L wf_test capture-pane -p`.
+  `tmux kill-server` (kills every server, including the user's), never
+  `kill-session`/`kill-window` on the default server.
+- Capture rendered output with `tmux -L wf_test capture-pane -p`.
+- After any tmux test, verify you left the **default** server untouched:
+  `tmux list-windows` should show only the user's own windows (no
+  `@wf_workspace` tags pointing into your scratchpad/sandbox). If a stray slipped
+  in, remove only windows whose `@wf_workspace` is under your scratchpad.
 - Prefer unit-testing the model's pure logic (see `internal/dashboard/*_test.go`)
   and the engine via the CLI; reserve the PTY harness for a final smoke check.
 

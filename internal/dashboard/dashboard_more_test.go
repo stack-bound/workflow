@@ -186,16 +186,14 @@ func TestEnterOpensDiffOnWorkspace(t *testing.T) {
 		t.Errorf("diff target = %s/%s", m2.diffProject, m2.diffBranch)
 	}
 
-	// On a project header it should warn instead.
+	// On a project (base) row, enter opens the base checkout's diff.
 	m.cursor = 0
-	m3, _ := step(m, runeKey("enter"))
-	_ = m3
 	m4, cmd := step(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("enter on header should not produce a diff command")
+	if cmd == nil {
+		t.Error("enter on a project row should produce a base-diff command")
 	}
-	if !m4.statusErr || !strings.Contains(m4.status, "select a workspace") {
-		t.Errorf("header enter status = %q", m4.status)
+	if m4.diffProject != "alpha" {
+		t.Errorf("base diff target project = %q, want alpha", m4.diffProject)
 	}
 }
 

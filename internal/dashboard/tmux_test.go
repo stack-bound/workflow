@@ -35,11 +35,11 @@ func TestTerminalKeyInTmuxReturnsCommand(t *testing.T) {
 		t.Error("t in tmux on a workspace should return a jump command")
 	}
 
-	// On a project header it should do nothing (no workspace selected).
+	// On a project (base) row, t opens a window on the base checkout at the root.
 	m.cursor = 0
 	_, cmd = step(m, runeKey("t"))
-	if cmd != nil {
-		t.Error("t on a project header should not return a command")
+	if cmd == nil {
+		t.Error("t on a project row should return a base-window command")
 	}
 }
 

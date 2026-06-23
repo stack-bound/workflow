@@ -5,6 +5,7 @@
 package dashboard
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -29,6 +30,9 @@ import (
 // user is on the ledger view.
 const refreshInterval = 4 * time.Second
 
+// errEmptyProjectPath guards launching a base checkout with no known root.
+var errEmptyProjectPath = errors.New("no project root path to open")
+
 // mode is the active interaction surface.
 type mode int
 
@@ -49,11 +53,15 @@ const (
 )
 
 // row is one rendered line in the ledger: a project header or a workspace.
+// A project row doubles as the project's base-checkout row — main carries the
+// branch the root is on and its dirty state, so the base branch can be launched
+// (tmux/editor) and its uncommitted diff viewed without a worktree.
 type row struct {
 	kind        rowKind
 	project     string
 	projectPath string
 	wsCount     int
+	main        workspace.MainCheckout
 	view        *workspace.View
 }
 
@@ -310,16 +318,34 @@ func (m Model) diffCmd(project, branch string) tea.Cmd {
 	}
 }
 
+// mainDiffCmd shows a project base checkout's uncommitted diff (the root's
+// working-tree changes vs HEAD), since the trunk has no base of its own.
+func (m Model) mainDiffCmd(project, branch string) tea.Cmd {
+	return func() tea.Msg {
+		content, err := m.mgr.MainDiff(project)
+		title := project + " · " + branch + " (base)"
+		return diffMsg{title: title, content: content, err: err}
+	}
+}
+
 func (m Model) copyCmd(project, branch string) tea.Cmd {
 	return func() tea.Msg {
 		path, err := m.mgr.Path(branch, project)
 		if err != nil {
 			return actionMsg{err: err}
 		}
+		return m.copyPathCmd(path, branch)()
+	}
+}
+
+// copyPathCmd copies a known path (e.g. a project root) to the clipboard,
+// labelling the confirmation with label.
+func (m Model) copyPathCmd(path, label string) tea.Cmd {
+	return func() tea.Msg {
 		if err := launcher.NewUniversal(m.global).CopyPath(path); err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{msg: "copied path for " + branch}
+		return actionMsg{msg: "copied path for " + label}
 	}
 }
 
@@ -349,17 +375,53 @@ func (m Model) openWindowCmd(project, branch string) tea.Cmd {
 	}
 }
 
+// openMainWindowCmd jumps to (or creates) a tmux window on a project's base
+// checkout at its root, so the trunk can be launched without a worktree. The
+// window is named after the base branch and tagged with the root path, so the
+// open indicator lights up on the project row like any other workspace.
+func (m Model) openMainWindowCmd(project, path, branch string) tea.Cmd {
+	return func() tea.Msg {
+		if path == "" {
+			return actionMsg{err: errEmptyProjectPath}
+		}
+		name := branch
+		if name == "" {
+			name = project
+		}
+		if err := launcher.NewTmux().Open(path, launcher.IdleName(m.global, name)); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: "opened base window for " + project, refresh: true}
+	}
+}
+
 // startEditCmd resolves a workspace's editor preferences off the main loop and
 // emits an editMsg. forcePicker (the "configure" key) always opens the picker;
 // otherwise autolaunch decides. Engine calls live here, not in the key handler,
 // so step()-based tests never touch a nil manager.
 func (m Model) startEditCmd(project, branch string, forcePicker bool) tea.Cmd {
+	return m.editCmd(project, branch, "", forcePicker)
+}
+
+// startEditPathCmd is startEditCmd for a known directory (a project base
+// checkout at its root) rather than a worktree resolved by branch.
+func (m Model) startEditPathCmd(project, branch, path string, forcePicker bool) tea.Cmd {
+	return m.editCmd(project, branch, path, forcePicker)
+}
+
+// editCmd resolves editor preferences and emits an editMsg. When path is empty
+// it is resolved from the worktree's branch; otherwise the given path is used
+// directly. Either way the IDE preferences are read per project.
+func (m Model) editCmd(project, branch, path string, forcePicker bool) tea.Cmd {
 	mgr := m.mgr
 	g := m.global
 	return func() tea.Msg {
-		path, err := mgr.Path(branch, project)
-		if err != nil {
-			return editMsg{err: err}
+		if path == "" {
+			p, err := mgr.Path(branch, project)
+			if err != nil {
+				return editMsg{err: err}
+			}
+			path = p
 		}
 		defaultID, autolaunch, _ := mgr.ProjectIDEPrefs(project)
 		if defaultID == "" {
@@ -598,6 +660,12 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.diffBranch = r.view.Worktree.Branch
 			return m, m.diffCmd(m.diffProject, m.diffBranch)
 		}
+		// On a project (base) row, show the root checkout's uncommitted diff.
+		if r, ok := m.current(); ok && r.kind == rowProject {
+			m.diffProject = r.project
+			m.diffBranch = r.main.Branch
+			return m, m.mainDiffCmd(r.project, r.main.Branch)
+		}
 		m.status, m.statusErr = "select a workspace to view its diff", true
 	case "a":
 		proj := m.currentProject()
@@ -613,13 +681,20 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case "e":
 		// Edit: autolaunch the project default when set, else open the picker.
+		// On a project row this opens the base checkout at the project root.
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.startEditCmd(r.view.Worktree.Project, r.view.Worktree.Branch, false)
+		}
+		if r, ok := m.current(); ok && r.kind == rowProject {
+			return m, m.startEditPathCmd(r.project, r.main.Branch, r.projectPath, false)
 		}
 	case "o":
 		// Configure editor: always open the picker (set default / autolaunch).
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.startEditCmd(r.view.Worktree.Project, r.view.Worktree.Branch, true)
+		}
+		if r, ok := m.current(); ok && r.kind == rowProject {
+			return m, m.startEditPathCmd(r.project, r.main.Branch, r.projectPath, true)
 		}
 	case "t":
 		if !m.inTmux {
@@ -629,19 +704,30 @@ func (m Model) handleLedgerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.openWindowCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
 		}
+		// On a project row, open a tmux window on the base checkout at the root.
+		if r, ok := m.current(); ok && r.kind == rowProject {
+			return m, m.openMainWindowCmd(r.project, r.projectPath, r.main.Branch)
+		}
 	case "c":
 		if r, ok := m.currentWorkspace(); ok {
 			return m, m.copyCmd(r.view.Worktree.Project, r.view.Worktree.Branch)
+		}
+		if r, ok := m.current(); ok && r.kind == rowProject {
+			return m, m.copyPathCmd(r.projectPath, r.project)
 		}
 	case "m":
 		if r, ok := m.currentWorkspace(); ok {
 			m.confirm = confirmFor("merge", r.view)
 			m.mode = modeConfirm
+		} else if r, ok := m.current(); ok && r.kind == rowProject {
+			m.status, m.statusErr = "merge applies to a worktree, not the base checkout", true
 		}
 	case "x":
 		if r, ok := m.currentWorkspace(); ok {
 			m.confirm = confirmFor("rm", r.view)
 			m.mode = modeConfirm
+		} else if r, ok := m.current(); ok && r.kind == rowProject {
+			m.status, m.statusErr = "remove applies to a worktree, not the base checkout", true
 		}
 	}
 	return m, nil
@@ -716,6 +802,7 @@ func (m *Model) setRows(projects []workspace.ProjectView) {
 			project:     pv.Project.Name,
 			projectPath: pv.Project.Path,
 			wsCount:     len(pv.Workspaces),
+			main:        pv.Main,
 		})
 		for j := range pv.Workspaces {
 			v := &pv.Workspaces[j]

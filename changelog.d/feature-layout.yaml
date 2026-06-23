@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - "Dashboard now shows a launchable base-checkout row for every project: it displays the branch the project root is on and its clean/dirty state, and `t` opens a tmux window on the base branch at the project root, `e`/`o` open it in an editor, and `enter` shows the root's uncommitted diff — so the trunk can be launched without first creating a worktree"
+changed:
+  - "Redesigned the dashboard with a polished lipgloss look: a full-width header bar with a project/worktree summary, a Catppuccin colour theme, tree connectors for the project → worktree hierarchy, aligned status columns, a highlighted selected row, a full-width footer help bar, and home-shortened, truncated project paths"
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - ""
+security:
+  - ""
+yanked:
+  - ""
