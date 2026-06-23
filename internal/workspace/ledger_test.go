@@ -101,3 +101,80 @@ func TestLedgerAndDiff(t *testing.T) {
 		t.Errorf("diff missing expected change:\n%s", diff)
 	}
 }
+
+// TestLedgerMainCheckout covers the project's base-checkout row: the branch the
+// root is on, its clean→dirty transition, and MainDiff reflecting uncommitted
+// work in the root.
+func TestLedgerMainCheckout(t *testing.T) {
+	repo := newRepo(t)
+
+	regPath := filepath.Join(t.TempDir(), "registry.json")
+	if err := registry.WithLock(regPath, func(s *registry.Store) error {
+		return s.AddProject(registry.Project{Name: "proj", Path: repo, AddedAt: time.Now().UTC().Format(time.RFC3339)})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := New(regPath, &config.Global{})
+
+	led, err := m.Ledger()
+	if err != nil {
+		t.Fatalf("Ledger: %v", err)
+	}
+	main := led[0].Main
+	if main.Err != nil {
+		t.Fatalf("main checkout error: %v", main.Err)
+	}
+	if main.Branch != "main" {
+		t.Errorf("main branch = %q, want main", main.Branch)
+	}
+	if main.Path != repo {
+		t.Errorf("main path = %q, want %q", main.Path, repo)
+	}
+	if main.Dirty {
+		t.Errorf("freshly committed root should be clean")
+	}
+
+	// Dirty the root checkout → Main.Dirty flips and MainDiff shows the change.
+	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	led, _ = m.Ledger()
+	if !led[0].Main.Dirty {
+		t.Errorf("root with uncommitted edit should be dirty")
+	}
+	diff, err := m.MainDiff("proj")
+	if err != nil {
+		t.Fatalf("MainDiff: %v", err)
+	}
+	if !strings.Contains(diff, "+changed") || !strings.Contains(diff, "-one") {
+		t.Errorf("MainDiff missing expected change:\n%s", diff)
+	}
+}
+
+// TestMainCheckoutMissingPath asserts a project whose root is gone degrades to a
+// populated Err rather than failing the whole ledger.
+func TestMainCheckoutMissingPath(t *testing.T) {
+	mc := mainCheckoutFor(filepath.Join(t.TempDir(), "does-not-exist"))
+	if mc.Err == nil {
+		t.Fatal("missing path should populate Err")
+	}
+	if mc.Branch != "" {
+		t.Errorf("missing path should have no branch, got %q", mc.Branch)
+	}
+}
+
+// TestMainCheckoutNotARepo asserts a project root that exists but is not a git
+// repository degrades to a concise, single-line error (not a raw git stderr
+// dump) so the dashboard's base row stays clean.
+func TestMainCheckoutNotARepo(t *testing.T) {
+	mc := mainCheckoutFor(t.TempDir()) // an empty dir, no .git
+	if mc.Err == nil {
+		t.Fatal("a non-repo root should populate Err")
+	}
+	if got := mc.Err.Error(); got != "not a git repository" {
+		t.Errorf("non-repo error = %q, want %q", got, "not a git repository")
+	}
+	if mc.Branch != "" {
+		t.Errorf("non-repo root should have no branch, got %q", mc.Branch)
+	}
+}

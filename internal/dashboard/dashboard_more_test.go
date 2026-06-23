@@ -55,8 +55,9 @@ func TestLedgerMsgPopulatesRows(t *testing.T) {
 		t.Fatalf("initial status = %q", m.status)
 	}
 	m, _ = step(m, ledgerMsg{projects: sampleLedger()})
-	if len(m.rows) != 4 {
-		t.Errorf("rows = %d, want 4", len(m.rows))
+	// alpha: header + base + 2 worktrees; beta: header + base = 6 rows.
+	if len(m.rows) != 6 {
+		t.Errorf("rows = %d, want 6", len(m.rows))
 	}
 	if m.status != "" {
 		t.Errorf("status not cleared after load: %q", m.status)
@@ -177,7 +178,7 @@ func TestLedgerQuit(t *testing.T) {
 
 func TestEnterOpensDiffOnWorkspace(t *testing.T) {
 	m := readyModel(t)
-	m.cursor = 1 // alpha/feat-1
+	m.cursor = 2 // alpha/feat-1 (header@0, main@1, feat-1@2)
 	m2, cmd := step(m, runeKey("d"))
 	if cmd == nil {
 		t.Fatal("d on workspace returned no diff command")
@@ -186,16 +187,14 @@ func TestEnterOpensDiffOnWorkspace(t *testing.T) {
 		t.Errorf("diff target = %s/%s", m2.diffProject, m2.diffBranch)
 	}
 
-	// On a project header it should warn instead.
-	m.cursor = 0
-	m3, _ := step(m, runeKey("enter"))
-	_ = m3
+	// On the base (main) row, enter opens the base checkout's diff.
+	m.cursor = 1
 	m4, cmd := step(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Error("enter on header should not produce a diff command")
+	if cmd == nil {
+		t.Error("enter on the base row should produce a base-diff command")
 	}
-	if !m4.statusErr || !strings.Contains(m4.status, "select a workspace") {
-		t.Errorf("header enter status = %q", m4.status)
+	if m4.diffProject != "alpha" {
+		t.Errorf("base diff target project = %q, want alpha", m4.diffProject)
 	}
 }
 
@@ -254,7 +253,7 @@ func TestMergeAndRemoveConfirm(t *testing.T) {
 		key, action string
 	}{{"m", "merge"}, {"x", "rm"}} {
 		m := readyModel(t)
-		m.cursor = 1 // alpha/feat-1
+		m.cursor = 2 // alpha/feat-1
 		m, _ = step(m, runeKey(tc.key))
 		if m.mode != modeConfirm {
 			t.Fatalf("%s → mode=%v, want confirm", tc.key, m.mode)
@@ -273,7 +272,7 @@ func TestMergeAndRemoveConfirm(t *testing.T) {
 
 func TestConfirmCancel(t *testing.T) {
 	m := readyModel(t)
-	m.cursor = 1
+	m.cursor = 2
 	m, _ = step(m, runeKey("m"))
 	m, _ = step(m, runeKey("n"))
 	if m.mode != modeLedger || !strings.Contains(m.status, "cancelled") {
@@ -291,7 +290,7 @@ func TestRefreshKey(t *testing.T) {
 
 func TestCopyKey(t *testing.T) {
 	m := readyModel(t)
-	m.cursor = 1
+	m.cursor = 2 // alpha/feat-1
 	_, cmd := step(m, runeKey("c"))
 	if cmd == nil {
 		t.Error("c on workspace returned no command")
@@ -312,7 +311,7 @@ func TestOpenKeyWithRealManager(t *testing.T) {
 	m := New(mgr, &config.Global{})
 	m, _ = step(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m, _ = step(m, ledgerMsg{projects: sampleLedger()})
-	m.cursor = 1 // alpha/feat-1
+	m.cursor = 2 // alpha/feat-1
 	_, cmd := step(m, runeKey("o"))
 	if cmd == nil {
 		t.Error("o on workspace returned no command")

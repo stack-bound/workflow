@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -11,38 +12,76 @@ import (
 	"github.com/stack-bound/workflow/internal/workspace"
 )
 
-// styles
+// theme is the dashboard's palette — Catppuccin Mocha hex values rather than
+// bare ANSI indices, so the look is consistent across terminal themes (lipgloss
+// down-samples to the terminal's colour profile automatically). Colours are
+// named by role at the var block below so call sites read semantically.
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	projectStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
-	activeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	cleanStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-	errStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("6"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	okStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-
-	diffAddStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	diffDelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	diffHunkStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	diffMetaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	dirtyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")) // the * uncommitted-changes marker
-	tmuxStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("14")) // the ▣ tmux-window-open indicator
+	cCrust   = lipgloss.Color("#11111b") // near-black, for text on bright bars
+	cText    = lipgloss.Color("#cdd6f4") // primary foreground
+	cSubtext = lipgloss.Color("#a6adc8") // secondary foreground
+	cOverlay = lipgloss.Color("#6c7086") // dim detail / help
+	cSurface = lipgloss.Color("#313244") // panel / footer background
+	cSel     = lipgloss.Color("#45475a") // selected-row background
+	cMauve   = lipgloss.Color("#cba6f7") // primary accent (header, projects)
+	cBlue    = lipgloss.Color("#89b4fa") // clean state
+	cGreen   = lipgloss.Color("#a6e3a1") // active state / additions
+	cPeach   = lipgloss.Color("#fab387") // dirty / uncommitted
+	cRed     = lipgloss.Color("#f38ba8") // errors / deletions
+	cTeal    = lipgloss.Color("#94e2d5") // branch refs
+	cLav     = lipgloss.Color("#b4befe") // tmux-open indicator
 )
 
-// Column widths for a workspace row. ledgerHeader reuses them so the headings
-// line up with the marks and numbers underneath.
+// styles
+var (
+	headerBarStyle = lipgloss.NewStyle().Foreground(cCrust).Background(cMauve).Bold(true)
+	footerBarStyle = lipgloss.NewStyle().Foreground(cSubtext).Background(cSurface)
+
+	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(cMauve)
+	colHeadStyle = lipgloss.NewStyle().Foreground(cOverlay).Bold(true)
+
+	projectStyle = lipgloss.NewStyle().Bold(true).Foreground(cMauve)
+	accentBar    = lipgloss.NewStyle().Foreground(cMauve)
+	pathStyle    = lipgloss.NewStyle().Foreground(cOverlay)
+	baseRefStyle = lipgloss.NewStyle().Foreground(cTeal)
+	connStyle    = lipgloss.NewStyle().Foreground(cOverlay)
+
+	activeStyle = lipgloss.NewStyle().Foreground(cGreen)
+	cleanStyle  = lipgloss.NewStyle().Foreground(cBlue)
+	dirtyState  = lipgloss.NewStyle().Foreground(cPeach)
+	errStyle    = lipgloss.NewStyle().Foreground(cRed)
+
+	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(cText).Background(cSel)
+	helpStyle     = lipgloss.NewStyle().Foreground(cOverlay)
+	okStyle       = lipgloss.NewStyle().Foreground(cGreen)
+
+	diffAddStyle  = lipgloss.NewStyle().Foreground(cGreen)
+	diffDelStyle  = lipgloss.NewStyle().Foreground(cRed)
+	diffHunkStyle = lipgloss.NewStyle().Foreground(cTeal)
+	diffMetaStyle = lipgloss.NewStyle().Foreground(cOverlay)
+
+	dirtyStyle = lipgloss.NewStyle().Foreground(cPeach) // the * uncommitted-changes marker
+	tmuxStyle  = lipgloss.NewStyle().Foreground(cLav)   // the ▣ tmux-window-open indicator
+)
+
+// Column widths for a worktree row. columnHeader reuses them so the headings
+// line up with the values underneath.
 const (
-	colBranch = 30
-	colState  = 7
-	colAB     = 12 // fits the "behind ahead" heading
+	colBranch = 26
+	colState  = 9
+	colAB     = 11
 	colDiff   = 12
 )
 
-// bodyHeight is the number of rows available between the title and footer.
+// wsLeadWidth is the visible width before a worktree row's branch name: cursor
+// prefix (2) + tree connector (3) + agent-status cell (2) + state circle and a
+// trailing space (2). columnHeader pads by this so "BRANCH" sits over the names.
+const wsLeadWidth = 9
+
+// bodyHeight is the number of rows available for the diff viewport (title +
+// blank above, help + scroll below).
 func (m Model) bodyHeight() int {
-	h := m.height - 4 // title line + blank + 2 footer lines
+	h := m.height - 4
 	if h < 1 {
 		return 1
 	}
@@ -96,7 +135,7 @@ func overlayBox(base, box string, width, height int) string {
 	}
 	pad := strings.Repeat(" ", leftPad)
 
-	// Vertically center the box in the body, keeping the title (first two lines)
+	// Vertically center the box in the body, keeping the header (first two lines)
 	// and the status/help (last two) visible so it reads as a popup over the
 	// ledger rather than a full-screen takeover.
 	const top = 2
@@ -122,24 +161,27 @@ func overlayBox(base, box string, width, height int) string {
 
 func (m Model) viewLedger() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("WorkFlow — dashboard"))
+	b.WriteString(m.headerBar())
 	b.WriteString("\n\n")
 
 	if len(m.rows) == 0 {
-		b.WriteString(helpStyle.Render("No projects registered. Add one from the CLI: wf project add"))
+		b.WriteString(helpStyle.Render("  No projects registered. Add one from the CLI: ") +
+			baseRefStyle.Render("wf project add"))
 		b.WriteString("\n")
 		return b.String() + m.footer()
 	}
 
+	b.WriteString(columnHeader())
+	b.WriteString("\n\n")
 	for i, r := range m.rows {
-		b.WriteString(m.renderRow(i, r))
-		b.WriteString("\n")
-		// Label the columns under each non-empty project so the marks and
-		// numbers below have a heading to read them against.
-		if r.kind == rowProject && r.wsCount > 0 {
-			b.WriteString(ledgerHeader())
+		// A blank line before each project block (except the first) spaces the
+		// blocks apart so empty projects aren't stacked. This is a render concern,
+		// not a row, so cursor navigation skips straight between real rows.
+		if r.kind == rowProject && i != 0 {
 			b.WriteString("\n")
 		}
+		b.WriteString(m.renderRow(i, r))
+		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
@@ -148,19 +190,49 @@ func (m Model) viewLedger() string {
 	return b.String() + m.footer()
 }
 
-// ledgerHeader is the dim column-heading row drawn beneath each project. The
-// eight leading spaces stand in for a workspace row's cursor (2) + tmux mark (2)
-// + agent-status cell (2) + status circle and its trailing space (2), so
-// "branch" sits above the names.
-func ledgerHeader() string {
-	h := fmt.Sprintf("        %-*s %-*s %-*s %-*s %s",
-		colBranch, "branch", colState, "state", colAB, "behind|ahead", colDiff, "diff", "base")
-	return helpStyle.Render(h)
+// counts totals projects and worktrees for the header summary.
+func (m Model) counts() (projects, worktrees int) {
+	for _, r := range m.rows {
+		switch r.kind {
+		case rowProject:
+			projects++
+		case rowWorkspace:
+			worktrees++
+		}
+	}
+	return projects, worktrees
 }
 
-// ledgerLegend is the one-line key beneath the ledger explaining every glyph and
-// column, each sample drawn in the same colour it carries in the rows above. The
-// agent-status glyphs come from the resolved config so the key matches the rows.
+// headerBar renders the full-width title bar: the app name on the left and a
+// project/worktree summary on the right, on a solid accent background that
+// spans the terminal width.
+func (m Model) headerBar() string {
+	projects, worktrees := m.counts()
+	left := " ✦ WorkFlow"
+	right := fmt.Sprintf("%d projects · %d worktrees ", projects, worktrees)
+	w := m.width
+	if w <= 0 {
+		w = lipgloss.Width(left) + lipgloss.Width(right) + 1
+	}
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	content := left + strings.Repeat(" ", gap) + right
+	return headerBarStyle.Width(w).Render(content)
+}
+
+// columnHeader is the single dim heading row above the ledger. It is padded by
+// wsLeadWidth so "BRANCH" aligns with the worktree branch names below it.
+func columnHeader() string {
+	h := strings.Repeat(" ", wsLeadWidth) +
+		fmt.Sprintf("%-*s%-*s%-*s%-*s%s",
+			colBranch, "BRANCH", colState, "STATE", colAB, "↓|↑", colDiff, "± LINES", "BASE")
+	return colHeadStyle.Render(h)
+}
+
+// ledgerLegend is the one-line key beneath the ledger. The agent-status glyphs
+// come from the resolved config so the key matches the rows above.
 func (m Model) ledgerLegend() string {
 	sep := helpStyle.Render("   ")
 	look := m.global.StatusLook()
@@ -220,48 +292,227 @@ func agentCell(l config.Look, colored bool) string {
 	return out
 }
 
+// renderRow dispatches a flattened ledger row to the header, base (main), or
+// worktree renderer, applying the cursor and the live tmux-open indicator.
 func (m Model) renderRow(i int, r row) string {
+	switch r.kind {
+	case rowProject:
+		return m.renderProjectRow(i, r)
+	case rowMain:
+		return m.renderMainRow(i, r)
+	default:
+		return m.renderWorkspaceRow(i, r)
+	}
+}
+
+// renderProjectRow draws a project's header line: an accent bar, the bold
+// project name, and the dim home-shortened project path to the right. It carries
+// no status columns — the base checkout and worktrees render on their own lines
+// below it. The header is the add target (a).
+func (m Model) renderProjectRow(i int, r row) string {
 	selected := i == m.cursor
-	prefix := "  "
+
+	cursor := "  "
 	if selected {
-		prefix = "❯ "
+		cursor = "❯ "
 	}
 
-	if r.kind == rowProject {
-		text := fmt.Sprintf("%s (%d)  %s", r.project, r.wsCount, r.projectPath)
-		if selected {
-			return prefix + selectedStyle.Render(text)
+	var left string
+	if selected {
+		left = cursor + selectedStyle.Render("▌ "+r.project)
+	} else {
+		left = cursor + accentBar.Render("▌ ") + projectStyle.Render(r.project)
+	}
+	return left + m.padPath(r.projectPath, left)
+}
+
+// mainMarker is the 3-cell lead marker for a base/main checkout row, occupying
+// the same width as a worktree's tree connector so the columns line up. The
+// diamond distinguishes the base checkout from a worktree child.
+const mainMarker = "◆  "
+
+// renderMainRow draws a project's base/main checkout on its own line, in the
+// same aligned columns as the worktree rows below it: a ◆ marker (where a
+// worktree has its tree connector), a blank agent cell (the base has no agent),
+// then the branch the root is on and its clean/dirty state. The base has no
+// ahead/behind, diff, or base columns, so those are left blank. It is the launch
+// target for the base branch (t/e/o/enter/c), so the open indicator shows when
+// its root window is up.
+func (m Model) renderMainRow(i int, r row) string {
+	selected := i == m.cursor
+	open := m.openPaths[r.projectPath]
+
+	cursor := "  "
+	if selected {
+		cursor = "❯ "
+	}
+
+	var left string
+	if selected {
+		left = cursor + accentBar.Render(mainMarker) + "  " + selectedStyle.Render(mainLine(r.main))
+	} else {
+		left = cursor + accentBar.Render(mainMarker) + "  " + mainStyled(r.main)
+	}
+	if open {
+		left += " " + tmuxStyle.Render("▣")
+	}
+	return left
+}
+
+// padPath right-aligns the dim, home-shortened project path to the terminal
+// width, given the already-rendered left segment. An over-long path is clipped
+// from the left (keeping the informative tail); when there is no room the path
+// is dropped rather than wrapped. On an unknown width it falls back to a fixed
+// gap.
+func (m Model) padPath(path, left string) string {
+	if path == "" {
+		return ""
+	}
+	path = shortenPath(path)
+	if m.width <= 0 {
+		return "  " + pathStyle.Render(path)
+	}
+	avail := m.width - lipgloss.Width(left) - 3 // 2-space gap + 1 right margin
+	if avail < 8 {
+		return ""
+	}
+	path = truncatePathLeft(path, avail)
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(path) - 1
+	if gap < 2 {
+		gap = 2
+	}
+	return strings.Repeat(" ", gap) + pathStyle.Render(path)
+}
+
+// shortenPath rewrites a leading home directory to ~ for a tidier display.
+func shortenPath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if p == home {
+			return "~"
 		}
-		return prefix + projectStyle.Render(text)
+		if strings.HasPrefix(p, home+string(os.PathSeparator)) {
+			return "~" + p[len(home):]
+		}
 	}
+	return p
+}
 
-	// A leading ▣ marks a workspace with a tmux window open right now (derived
-	// live each refresh); a plain indent keeps the columns aligned otherwise.
+// truncatePathLeft clips p from the left to a visible width of w, marking the
+// cut with a leading … so the (more useful) tail of the path survives.
+func truncatePathLeft(p string, w int) string {
+	if lipgloss.Width(p) <= w {
+		return p
+	}
+	r := []rune(p)
+	for len(r) > 0 && lipgloss.Width(string(r))+1 > w {
+		r = r[1:]
+	}
+	return "…" + string(r)
+}
+
+// mainBranch is the branch label for a base checkout, falling back to an em dash
+// when the root is on no branch (detached) or its status couldn't be read.
+func mainBranch(mc workspace.MainCheckout) string {
+	if mc.Branch == "" {
+		return "—"
+	}
+	return mc.Branch
+}
+
+// mainLine formats a base checkout's columns WITHOUT accent colours (the layout
+// reference and the body of the selected row). It mirrors a worktree's BRANCH
+// and STATE columns — a state circle, the branch, and the clean/dirty word — but
+// leaves the ahead/behind, diff, and base columns blank, since a base checkout
+// has none of those. A status error degrades to "! <branch> <message>".
+func mainLine(mc workspace.MainCheckout) string {
+	if mc.Err != nil {
+		return "! " + fitBranch(mainBranch(mc)) + firstLine(mc.Err.Error())
+	}
+	mark, word, _ := mainState(mc)
+	return mark + " " + fitBranch(mainBranch(mc)) + word
+}
+
+// mainStyled is mainLine with accent colours: the branch in the primary
+// foreground (its identity), the state circle and word in the clean/dirty
+// colour, and a status error in red.
+func mainStyled(mc workspace.MainCheckout) string {
+	if mc.Err != nil {
+		return errStyle.Render("! " + fitBranch(mainBranch(mc)) + firstLine(mc.Err.Error()))
+	}
+	mark, word, style := mainState(mc)
+	return style.Render(mark) + " " +
+		lipgloss.NewStyle().Foreground(cText).Render(fitBranch(mainBranch(mc))) +
+		style.Render(word)
+}
+
+// firstLine collapses a (possibly multi-line) error to its first line, so a raw
+// git stderr dump can never wrap the base row and break the table alignment.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+// mainState reports the circle, word, and colour for a base checkout: a peach
+// "● dirty" when the root has uncommitted changes, else a blue "○ clean".
+func mainState(mc workspace.MainCheckout) (mark, word string, style lipgloss.Style) {
+	if mc.Dirty {
+		return "●", "dirty", dirtyState
+	}
+	return "○", "clean", cleanStyle
+}
+
+// renderWorkspaceRow draws a worktree as a tree child: a connector (├─/└─), the
+// agent-status cell, the aligned status columns, and the live tmux-open
+// indicator. The directory path is intentionally omitted (it lives on the
+// project header) to keep the row uncluttered. The selected row takes one
+// highlight over the plain layout; every other row is accent-coloured field by
+// field so a colour flags a status, not the whole line.
+func (m Model) renderWorkspaceRow(i int, r row) string {
+	selected := i == m.cursor
 	open := r.view != nil && m.openPaths[r.view.Worktree.Path]
 
-	// The selected row takes one highlight over the plain layout; every other
-	// row is accent-coloured field by field (workspaceStyled) so the green flags
-	// a status, not the whole line.
+	cursor := "  "
 	if selected {
-		indent := "  "
-		if open {
-			indent = "▣ "
-		}
-		return prefix + selectedStyle.Render(indent+agentCell(m.agentLook(r.view), false)+workspaceLine(r.view))
+		cursor = "❯ "
 	}
+	conn := connectorFor(m.isLastWorkspace(i))
 
-	indent := "  "
-	if open {
-		indent = tmuxStyle.Render("▣") + " "
+	var left string
+	if selected {
+		left = cursor + connStyle.Render(conn) + agentCell(m.agentLook(r.view), false) +
+			selectedStyle.Render(workspaceLine(r.view))
+	} else {
+		left = cursor + connStyle.Render(conn) + agentCell(m.agentLook(r.view), true) +
+			workspaceStyled(r.view)
 	}
-	return prefix + indent + agentCell(m.agentLook(r.view), true) + workspaceStyled(r.view)
+	if open {
+		left += " " + tmuxStyle.Render("▣")
+	}
+	return left
+}
+
+// isLastWorkspace reports whether the worktree row at i is the final child of
+// its project (the next row is a different project or the end), so the tree
+// connector can switch from ├─ to └─.
+func (m Model) isLastWorkspace(i int) bool {
+	next := i + 1
+	return next >= len(m.rows) || m.rows[next].kind == rowProject
+}
+
+// connectorFor returns the 3-cell tree connector for a worktree row.
+func connectorFor(last bool) string {
+	if last {
+		return "└─ "
+	}
+	return "├─ "
 }
 
 // wsState reports the status circle and word for a workspace, plus the colour
 // both carry: a filled ● "active" (green) when it holds work not yet in base
 // (dirty, ahead, or an open PR), or a hollow ○ "clean" (blue) when nothing is
-// outstanding. Both states get a colour so neither reads as the privileged one —
-// "clean" describes the git state, not that you are finished.
+// outstanding.
 func wsState(v *workspace.View) (mark, word string, style lipgloss.Style) {
 	if v.Active() {
 		return "●", "active", activeStyle
@@ -271,7 +522,6 @@ func wsState(v *workspace.View) (mark, word string, style lipgloss.Style) {
 
 // behindAhead renders the commit gap to base, behind first to match the column
 // heading: ↓ counts commits on base this branch lacks, ↑ commits it has on top.
-// The pipe ties the pair into one column under the "behind|ahead" heading.
 func behindAhead(v *workspace.View) string {
 	return fmt.Sprintf("↓%d|↑%d", v.Stat.Behind, v.Stat.Ahead)
 }
@@ -287,15 +537,12 @@ func changesText(v *workspace.View) string {
 }
 
 // fitBranch sizes a branch name to exactly the branch column: short names are
-// space-padded (as %-*s did), and a name wider than the column is clipped with a
-// trailing … so an over-long branch can never push the columns after it — state,
-// behind|ahead, diff, base — out of alignment with the header.
+// space-padded, and a name wider than the column is clipped with a trailing … so
+// an over-long branch can never push the columns after it out of alignment.
 func fitBranch(name string) string {
 	if lipgloss.Width(name) <= colBranch {
 		return fmt.Sprintf("%-*s", colBranch, name)
 	}
-	// Reserve one cell for the … marker, dropping trailing runes until the name
-	// plus the marker fits the column exactly (width-aware for multibyte names).
 	r := []rune(name)
 	for len(r) > 0 && lipgloss.Width(string(r))+1 > colBranch {
 		r = r[:len(r)-1]
@@ -303,38 +550,44 @@ func fitBranch(name string) string {
 	return string(r) + "…"
 }
 
-// workspaceLine formats a workspace status line WITHOUT accent colours. It is the
-// layout reference and the body of the selected row (which gets one highlight).
+// pad right-pads s with spaces to a visible width of w (no-op if already wider).
+func pad(s string, w int) string {
+	if d := w - lipgloss.Width(s); d > 0 {
+		return s + strings.Repeat(" ", d)
+	}
+	return s
+}
+
+// workspaceLine formats a worktree's status columns WITHOUT accent colours. It
+// is the layout reference and the body of the selected row (which gets one
+// highlight).
 func workspaceLine(v *workspace.View) string {
 	w := v.Worktree
 	if v.StatErr != nil {
 		return fmt.Sprintf("! %s %s", fitBranch(w.Branch), v.StatErr.Error())
 	}
 	mark, word, _ := wsState(v)
-	return fmt.Sprintf("%s %s %-*s %-*s %-*s %s",
-		mark, fitBranch(w.Branch), colState, word, colAB, behindAhead(v), colDiff, changesText(v), w.Base)
+	return mark + " " + fitBranch(w.Branch) +
+		pad(word, colState) + pad(behindAhead(v), colAB) + pad(changesText(v), colDiff) + w.Base
 }
 
-// workspaceStyled formats a workspace status line with accent colours only: the
-// branch name stays in the default foreground (it is the row's identity), the
-// status circle and word carry the active/clean colour, the diff counts are
-// green/red with a yellow * for uncommitted work, and the ahead/behind and base
-// columns are dimmed as secondary detail.
+// workspaceStyled formats a worktree's status columns with accent colours: the
+// branch name stays default (it is the row's identity), the status circle and
+// word carry the active/clean colour, the diff counts are green/red with a
+// yellow * for uncommitted work, and the ahead/behind and base columns are
+// dimmed as secondary detail.
 func workspaceStyled(v *workspace.View) string {
 	w := v.Worktree
 	if v.StatErr != nil {
 		return errStyle.Render(fmt.Sprintf("! %s %s", fitBranch(w.Branch), v.StatErr.Error()))
 	}
 	mark, word, style := wsState(v)
-	cols := []string{
-		style.Render(mark),
-		fitBranch(w.Branch),
-		style.Render(fmt.Sprintf("%-*s", colState, word)),
-		helpStyle.Render(fmt.Sprintf("%-*s", colAB, behindAhead(v))),
-		styledChanges(v),
-		helpStyle.Render(w.Base),
-	}
-	return strings.Join(cols, " ")
+	return style.Render(mark) + " " +
+		lipgloss.NewStyle().Foreground(cText).Render(fitBranch(w.Branch)) +
+		style.Render(pad(word, colState)) +
+		helpStyle.Render(pad(behindAhead(v), colAB)) +
+		styledChanges(v) +
+		helpStyle.Render(w.Base)
 }
 
 // styledChanges renders the diff column with semantic colour — green additions,
@@ -349,8 +602,8 @@ func styledChanges(v *workspace.View) string {
 		raw += " *"
 		colored += " " + dirtyStyle.Render("*")
 	}
-	if pad := colDiff - lipgloss.Width(raw); pad > 0 {
-		colored += strings.Repeat(" ", pad)
+	if p := colDiff - lipgloss.Width(raw); p > 0 {
+		colored += strings.Repeat(" ", p)
 	}
 	return colored
 }
@@ -363,7 +616,8 @@ func (m Model) viewDiff() string {
 	return header + m.vp.View() + footer
 }
 
-// footer renders the status line and a mode-specific help line.
+// footer renders the status line and a mode-specific help bar (full-width,
+// on a dim surface so the screen reads as framed top and bottom).
 func (m Model) footer() string {
 	var status string
 	switch {
@@ -389,21 +643,35 @@ func (m Model) footer() string {
 		help = "↑/↓ move · enter open · d default · a autolaunch · esc cancel"
 	default:
 		// "e" edits (autolaunch or picker) and "o" configures the editor; "t"
-		// jumps to the tmux window when wf is running inside tmux.
+		// jumps to the tmux window when wf is running inside tmux. On a project
+		// row these act on the base checkout at the project root.
 		editHelp := "e edit · o config"
 		if m.inTmux {
 			editHelp += " · t term"
 		}
-		help = "↑/↓ move · enter diff · a add · " + editHelp + " · c copy · m merge · x rm · r refresh · q quit"
+		help = "↑↓ move · enter diff · a add · " + editHelp + " · c copy · m merge · x rm · r refresh · q quit"
 	}
-	return "\n" + status + "\n" + helpStyle.Render(help)
+	return "\n " + status + "\n" + m.helpBar(help)
+}
+
+// helpBar renders the help text as a full-width footer bar.
+func (m Model) helpBar(help string) string {
+	content := " " + help
+	w := m.width
+	if w <= 0 {
+		return footerBarStyle.Render(content)
+	}
+	if p := w - lipgloss.Width(content); p > 0 {
+		content += strings.Repeat(" ", p)
+	}
+	return footerBarStyle.Width(w).Render(content)
 }
 
 // prompt renders the y/n confirmation line for a pending action. Merge is a
-// plain caution; remove first weighs whether the workspace still holds work
-// that deletion would discard — uncommitted changes or commits not yet on
-// base — warning in red when it does (or when status is unknown) and
-// reassuring in green when the branch is safe to drop.
+// plain caution; remove first weighs whether the workspace still holds work that
+// deletion would discard — uncommitted changes or commits not yet on base —
+// warning in red when it does (or when status is unknown) and reassuring in
+// green when the branch is safe to drop.
 func (c confirm) prompt() string {
 	if c.action != "rm" {
 		return errStyle.Render(fmt.Sprintf("Merge %s/%s? [y/n]", c.project, c.branch))
@@ -415,10 +683,10 @@ func (c confirm) prompt() string {
 }
 
 // removeRisk describes the work that removing this workspace would lose, or ""
-// when the branch is clean and fully merged into base (safe to drop). Note the
-// +/- diff counts are deliberately *not* used as a safety signal: a branch that
-// is merely behind base shows a non-zero diff while holding no work of its own.
-// A failed status check returns a cautious note rather than vouching for safety.
+// when the branch is clean and fully merged into base (safe to drop). The +/-
+// diff counts are deliberately *not* used as a safety signal: a branch merely
+// behind base shows a non-zero diff while holding no work of its own. A failed
+// status check returns a cautious note rather than vouching for safety.
 func (c confirm) removeRisk() string {
 	if c.statErr {
 		return "changes that couldn't be verified (git status unavailable)"

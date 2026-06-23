@@ -45,7 +45,7 @@ func TestRowShowsWorkingGlyphAndHidesIdle(t *testing.T) {
 		projects: oneWorkspaceLedger("/wt/feat"),
 		statuses: map[string]status.State{"/wt/feat": status.Working},
 	})
-	if row := m.renderRow(1, m.rows[1]); !strings.Contains(row, working) {
+	if row := m.renderRow(2, m.rows[2]); !strings.Contains(row, working) {
 		t.Errorf("working row missing glyph %q: %q", working, row)
 	}
 
@@ -54,7 +54,7 @@ func TestRowShowsWorkingGlyphAndHidesIdle(t *testing.T) {
 	m2 := New(nil, nil)
 	m2, _ = step(m2, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m2, _ = step(m2, ledgerMsg{projects: oneWorkspaceLedger("/wt/feat")}) // no statuses
-	if row := m2.renderRow(1, m2.rows[1]); strings.Contains(row, working) {
+	if row := m2.renderRow(2, m2.rows[2]); strings.Contains(row, working) {
 		t.Errorf("idle row should not show the working glyph: %q", row)
 	}
 }

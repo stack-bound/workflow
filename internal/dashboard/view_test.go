@@ -21,7 +21,7 @@ func TestViewLoadingBeforeReady(t *testing.T) {
 func TestViewLedgerRendersRows(t *testing.T) {
 	m := readyModel(t)
 	out := m.View()
-	for _, want := range []string{"WorkFlow — dashboard", "alpha", "feat-1", "beta"} {
+	for _, want := range []string{"WorkFlow", "alpha", "feat-1", "beta"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("ledger view missing %q:\n%s", want, out)
 		}
@@ -62,7 +62,7 @@ func TestFooterInputAndConfirm(t *testing.T) {
 	}
 
 	m2 := readyModel(t)
-	m2.cursor = 1
+	m2.cursor = 2                  // alpha/feat-1
 	m2, _ = step(m2, runeKey("x")) // confirm rm
 	out := m2.View()
 	if !strings.Contains(out, "y/n") || !strings.Contains(out, "feat-1") {
@@ -195,12 +195,12 @@ func TestBehindAheadOrder(t *testing.T) {
 	}
 }
 
-// TestLedgerHeaderAndLegend asserts the new column headings and the glyph key
-// render into the ledger view so the numbers and symbols are self-explaining.
+// TestLedgerHeaderAndLegend asserts the column headings and the glyph key render
+// into the ledger view so the numbers and symbols are self-explaining.
 func TestLedgerHeaderAndLegend(t *testing.T) {
 	out := readyModel(t).View()
 	for _, want := range []string{
-		"branch", "state", "behind|ahead", "diff", "base", // column headings
+		"BRANCH", "STATE", "± LINES", "BASE", // column headings
 		"● active", "○ clean", "▣ tmux open", // glyph key
 		"↓behind|↑ahead", "+added", "-removed", "* uncommitted", // column key
 	} {
@@ -217,13 +217,45 @@ func TestLedgerHeaderAndLegend(t *testing.T) {
 func TestLedgerHeaderAlignsWithRow(t *testing.T) {
 	m := readyModel(t)
 	m.cursor = 0                     // project selected → the workspace rows render unselected (accent-styled)
-	row := m.renderRow(1, m.rows[1]) // alpha/feat-1
-	h := ledgerHeader()
+	row := m.renderRow(2, m.rows[2]) // alpha/feat-1 (header@0, main@1, feat-1@2)
+	h := columnHeader()
 
-	hCol := lipgloss.Width(h[:strings.Index(h, "branch")])
+	hCol := lipgloss.Width(h[:strings.Index(h, "BRANCH")])
 	rCol := lipgloss.Width(row[:strings.Index(row, "feat-1")])
 	if hCol != rCol {
 		t.Errorf("branch heading at col %d, branch name at col %d:\nhdr: %q\nrow: %q", hCol, rCol, h, row)
+	}
+}
+
+// TestBaseRowAlignsWithHeaderAndWorktree is the core regression for the redesign:
+// the base (main) row's branch and state must sit in the same columns as the
+// column header and the worktree rows below it, so the table reads straight down.
+func TestBaseRowAlignsWithHeaderAndWorktree(t *testing.T) {
+	m := New(nil, nil)
+	m, _ = step(m, tea.WindowSizeMsg{Width: 120, Height: 24})
+	m, _ = step(m, ledgerMsg{projects: projectLedger()})
+	m.cursor = 0 // header selected → base and worktree rows render unselected
+
+	h := columnHeader()
+	base := m.renderRow(1, m.rows[1]) // ◆ development  ○ clean
+	ws := m.renderRow(2, m.rows[2])   // ├─ feature/layout ...
+
+	// BRANCH column: header heading, base branch, and worktree branch all align.
+	hBranch := lipgloss.Width(h[:strings.Index(h, "BRANCH")])
+	baseBranch := lipgloss.Width(base[:strings.Index(base, "development")])
+	wsBranch := lipgloss.Width(ws[:strings.Index(ws, "feature/layout")])
+	if hBranch != baseBranch || baseBranch != wsBranch {
+		t.Errorf("branch column misaligned: header=%d base=%d worktree=%d\nhdr:  %q\nbase: %q\nws:   %q",
+			hBranch, baseBranch, wsBranch, h, base, ws)
+	}
+
+	// STATE column: header heading, base state word, and worktree state word align.
+	hState := lipgloss.Width(h[:strings.Index(h, "STATE")])
+	baseState := lipgloss.Width(base[:strings.Index(base, "clean")])
+	wsState := lipgloss.Width(ws[:strings.Index(ws, "active")])
+	if hState != baseState || baseState != wsState {
+		t.Errorf("state column misaligned: header=%d base=%d worktree=%d\nhdr:  %q\nbase: %q\nws:   %q",
+			hState, baseState, wsState, h, base, ws)
 	}
 }
 
@@ -262,9 +294,9 @@ func TestLongBranchKeepsColumnsAligned(t *testing.T) {
 	m.setRows(projects)
 	m.cursor = 0 // project header selected → the workspace renders unselected
 
-	row := m.renderRow(1, m.rows[1])
-	h := ledgerHeader()
-	hCol := lipgloss.Width(h[:strings.Index(h, "state")])
+	row := m.renderRow(2, m.rows[2]) // header@0, main@1, worktree@2
+	h := columnHeader()
+	hCol := lipgloss.Width(h[:strings.Index(h, "STATE")])
 	rCol := lipgloss.Width(row[:strings.Index(row, "clean")])
 	if hCol != rCol {
 		t.Errorf("state heading at col %d, state value at col %d:\nhdr: %q\nrow: %q", hCol, rCol, h, row)
@@ -278,8 +310,8 @@ func TestRenderRowSelectionAndKinds(t *testing.T) {
 	if got := m.renderRow(0, m.rows[0]); !strings.Contains(got, "alpha") || !strings.HasPrefix(got, "❯ ") {
 		t.Errorf("selected project row = %q", got)
 	}
-	// Workspace row not selected.
-	if got := m.renderRow(1, m.rows[1]); !strings.Contains(got, "feat-1") || strings.HasPrefix(got, "❯ ") {
+	// Workspace row (index 2) not selected.
+	if got := m.renderRow(2, m.rows[2]); !strings.Contains(got, "feat-1") || strings.HasPrefix(got, "❯ ") {
 		t.Errorf("unselected workspace row = %q", got)
 	}
 }

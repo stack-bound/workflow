@@ -23,7 +23,7 @@ func sampleIDEs() []ide.IDE {
 func TestEditKeysDispatchCommand(t *testing.T) {
 	for _, k := range []string{"e", "o"} {
 		m := readyModel(t)
-		m.cursor = 1 // alpha/feat-1
+		m.cursor = 2 // alpha/feat-1
 		m2, cmd := step(m, runeKey(k))
 		if cmd == nil {
 			t.Errorf("%q should dispatch a command", k)
@@ -34,13 +34,19 @@ func TestEditKeysDispatchCommand(t *testing.T) {
 	}
 }
 
-// e / o on a project header (no workspace) do nothing.
-func TestEditKeyOnProjectHeaderNoop(t *testing.T) {
-	m := readyModel(t)
-	m.cursor = 0 // alpha header
-	_, cmd := step(m, runeKey("e"))
-	if cmd != nil {
-		t.Error("edit on a project header should be a no-op")
+// e / o on the base (main) row dispatch the edit command for the base checkout
+// at the project root, staying on the ledger until the editMsg arrives.
+func TestEditKeyOnMainRowOpensBase(t *testing.T) {
+	for _, k := range []string{"e", "o"} {
+		m := readyModel(t)
+		m.cursor = 1 // alpha base (main) row
+		m2, cmd := step(m, runeKey(k))
+		if cmd == nil {
+			t.Errorf("%q on the base row should dispatch a base-edit command", k)
+		}
+		if m2.mode != modeLedger {
+			t.Errorf("%q should not change mode synchronously, got %v", k, m2.mode)
+		}
 	}
 }
 
@@ -140,7 +146,7 @@ func TestViewPickerRendersOverLedger(t *testing.T) {
 		t.Error("picker overlay should show editor names over the ledger")
 	}
 	// The ledger underneath is still partly visible (title stays at the top).
-	if !strings.Contains(out, "WorkFlow — dashboard") {
+	if !strings.Contains(out, "WorkFlow") {
 		t.Error("ledger title should remain visible behind the popup")
 	}
 }

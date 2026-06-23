@@ -16,7 +16,7 @@ func wsViewPath(project, branch, path string) workspace.View {
 func TestTerminalKeyWithoutTmux(t *testing.T) {
 	m := readyModel(t)
 	m.inTmux = false
-	m.cursor = 1 // a workspace
+	m.cursor = 2 // a workspace
 	m, cmd := step(m, runeKey("t"))
 	if cmd != nil {
 		t.Error("t without tmux should not return a command")
@@ -29,17 +29,17 @@ func TestTerminalKeyWithoutTmux(t *testing.T) {
 func TestTerminalKeyInTmuxReturnsCommand(t *testing.T) {
 	m := readyModel(t)
 	m.inTmux = true
-	m.cursor = 1 // alpha/feat-1
+	m.cursor = 2 // alpha/feat-1
 	_, cmd := step(m, runeKey("t"))
 	if cmd == nil {
 		t.Error("t in tmux on a workspace should return a jump command")
 	}
 
-	// On a project header it should do nothing (no workspace selected).
-	m.cursor = 0
+	// On the base (main) row, t opens a window on the base checkout at the root.
+	m.cursor = 1
 	_, cmd = step(m, runeKey("t"))
-	if cmd != nil {
-		t.Error("t on a project header should not return a command")
+	if cmd == nil {
+		t.Error("t on the base row should return a base-window command")
 	}
 }
 

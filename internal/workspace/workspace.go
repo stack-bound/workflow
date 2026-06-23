@@ -135,7 +135,45 @@ func (m *Manager) Add(opts AddOptions) (*registry.Worktree, error) {
 // shape the dashboard's project → worktree tree renders.
 type ProjectView struct {
 	Project    registry.Project
+	Main       MainCheckout
 	Workspaces []View
+}
+
+// MainCheckout is the live status of a project's primary checkout — the repo at
+// the project root. The dashboard renders it as the project's own row so the
+// base branch can be opened (a tmux window or editor) without first carving off
+// a worktree. Unlike a worktree it has no base to diff against, so it carries
+// only the branch it is on and whether its working tree is dirty.
+type MainCheckout struct {
+	Path   string // the project root (== Project.Path)
+	Branch string // branch currently checked out at the root
+	Dirty  bool   // uncommitted changes in the root checkout
+	Err    error  // status couldn't be derived (path missing, not a repo, …)
+}
+
+// mainCheckoutFor derives the live status of a project's root checkout. A
+// missing path or a non-repo root degrades to a populated Err rather than an
+// error return, so one broken project never blanks the whole ledger.
+func mainCheckoutFor(path string) MainCheckout {
+	mc := MainCheckout{Path: path}
+	if _, err := os.Stat(path); err != nil {
+		mc.Err = fmt.Errorf("project path missing")
+		return mc
+	}
+	if !git.IsRepo(path) {
+		mc.Err = fmt.Errorf("not a git repository")
+		return mc
+	}
+	branch, err := git.CurrentBranch(path)
+	if err != nil {
+		mc.Err = err
+		return mc
+	}
+	mc.Branch = branch
+	if dirty, err := git.Dirty(path); err == nil {
+		mc.Dirty = dirty
+	}
+	return mc
 }
 
 // viewFor joins a worktree with its live git status.
@@ -171,13 +209,25 @@ func (m *Manager) Ledger() ([]ProjectView, error) {
 	}
 	out := make([]ProjectView, 0, len(store.Projects))
 	for _, p := range store.Projects {
-		pv := ProjectView{Project: p}
+		pv := ProjectView{Project: p, Main: mainCheckoutFor(p.Path)}
 		for _, w := range store.WorktreesForProject(p.Name) {
 			pv.Workspaces = append(pv.Workspaces, viewFor(w))
 		}
 		out = append(out, pv)
 	}
 	return out, nil
+}
+
+// MainDiff returns the uncommitted diff of a project's root checkout — the
+// working-tree changes the base row would discard if launched-and-edited. It
+// diffs against HEAD (the checkout's own tip) rather than a base branch, since
+// the trunk has no base of its own.
+func (m *Manager) MainDiff(project string) (string, error) {
+	root, err := m.ProjectRoot(project)
+	if err != nil {
+		return "", err
+	}
+	return git.Diff(root, "HEAD")
 }
 
 // Diff returns the cumulative diff of a workspace against its base branch.

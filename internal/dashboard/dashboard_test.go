@@ -31,7 +31,8 @@ func TestSetRowsFlattensTree(t *testing.T) {
 	m := New(nil, nil)
 	m.setRows(sampleLedger())
 
-	wantKinds := []rowKind{rowProject, rowWorkspace, rowWorkspace, rowProject}
+	// Each project block is header → base (main) → its worktrees.
+	wantKinds := []rowKind{rowProject, rowMain, rowWorkspace, rowWorkspace, rowProject, rowMain}
 	if len(m.rows) != len(wantKinds) {
 		t.Fatalf("got %d rows, want %d", len(m.rows), len(wantKinds))
 	}
@@ -43,15 +44,15 @@ func TestSetRowsFlattensTree(t *testing.T) {
 	if m.rows[0].wsCount != 2 {
 		t.Errorf("alpha header wsCount = %d, want 2", m.rows[0].wsCount)
 	}
-	if m.rows[3].project != "beta" {
-		t.Errorf("last row project = %q, want beta", m.rows[3].project)
+	if m.rows[4].project != "beta" {
+		t.Errorf("second project header = %q, want beta", m.rows[4].project)
 	}
 }
 
 func TestSetRowsPreservesSelection(t *testing.T) {
 	m := New(nil, nil)
 	m.setRows(sampleLedger())
-	m.cursor = 2 // alpha/feat-2
+	m.cursor = 3 // alpha/feat-2 (after header@0, main@1, feat-1@2)
 	if _, ok := m.currentWorkspace(); !ok {
 		t.Fatal("expected a workspace under the cursor")
 	}
@@ -90,11 +91,11 @@ func TestCursorClamp(t *testing.T) {
 func TestCurrentProject(t *testing.T) {
 	m := New(nil, nil)
 	m.setRows(sampleLedger())
-	m.cursor = 1 // alpha/feat-1
+	m.cursor = 2 // alpha/feat-1
 	if got := m.currentProject(); got != "alpha" {
 		t.Errorf("currentProject on workspace = %q, want alpha", got)
 	}
-	m.cursor = 3 // beta header (empty project)
+	m.cursor = 4 // beta header (empty project)
 	if got := m.currentProject(); got != "beta" {
 		t.Errorf("currentProject on header = %q, want beta", got)
 	}
