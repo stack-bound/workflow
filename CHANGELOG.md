@@ -2,6 +2,16 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.5.0] - 2026-06-23 (80.5)
+### Added
+- Dashboard now shows a launchable base-checkout row for every project: it displays the branch the project root is on and its clean/dirty state, and `t` opens a tmux window on the base branch at the project root, `e`/`o` open it in an editor, and `enter` shows the root's uncommitted diff — so the trunk can be launched without first creating a worktree
+- Manage projects from the dashboard: press enter on a project row to open a centered popup menu and rename the project or delete (unregister) it, with arrow-key navigation and a colour-coded confirmation card that warns when a delete would drop registered workspaces
+- New `wf project rename <old> <new>` command renames a registered project and retargets its worktrees
+### Changed
+- Redesigned the dashboard with a polished lipgloss look: a full-width header bar with a project/worktree summary, a Catppuccin colour theme, a highlighted selected row, and a full-width footer help bar
+- Reworked the dashboard ledger into a clean per-project block: a header line with the project name and home-shortened path, the base checkout on its own row (marked ◆, showing the root branch and clean/dirty state with the ahead/behind, diff, and base columns left blank), and worktrees as aligned tree children — the base row and worktree rows now line up under one set of column headings, with a blank line spacing each project apart. Per-worktree directory paths were dropped from the rows to cut clutter (the path stays on the project header), and the base-launch keys (`t`/`e`/`o`/`enter`/`c`) act on the base row
+- Dashboard prompts (add-workspace input, and the merge/remove/delete confirmations) now render as centered, themed popup cards over the ledger — red for destructive actions, green when safe — instead of a plain bottom-line prompt
+
 ## [0.4.0] - 2026-06-19 (79.2%)
 ### Added
 - tmux integration (auto-detected, guest-only): `wf add` gives each new workspace a real tmux window in your current session, one window per workspace
