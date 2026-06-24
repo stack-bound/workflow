@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - ""
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - "Dashboard ledger no longer lets the STATE word touch the branch name when the branch fills the branch column"
+security:
+  - ""
+yanked:
+  - ""

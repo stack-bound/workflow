@@ -278,8 +278,9 @@ func TestBaseRowAlignsWithHeaderAndWorktree(t *testing.T) {
 }
 
 // TestFitBranch pins the branch column to a fixed width: short names pad out to
-// it, and an over-long name is clipped to it with a trailing … so it can never
-// exceed the column and shove the columns after it right.
+// it, and an over-long name is clipped with a trailing … so it can never exceed
+// the column and shove the columns after it right. The column always keeps at
+// least one trailing space so the STATE column never touches the branch name.
 func TestFitBranch(t *testing.T) {
 	short := fitBranch("calm")
 	if w := lipgloss.Width(short); w != colBranch {
@@ -293,8 +294,21 @@ func TestFitBranch(t *testing.T) {
 	if w := lipgloss.Width(long); w != colBranch {
 		t.Errorf("long branch width = %d, want %d: %q", w, colBranch, long)
 	}
-	if !strings.HasSuffix(long, "…") {
+	if !strings.Contains(long, "…") {
 		t.Errorf("clipped branch missing … marker: %q", long)
+	}
+
+	// A name exactly the column width still must leave a trailing gap so the
+	// STATE word never touches it (the reported "isolationdirty" bug).
+	exact := fitBranch(strings.Repeat("x", colBranch))
+	if w := lipgloss.Width(exact); w != colBranch {
+		t.Errorf("exact-width branch width = %d, want %d: %q", w, colBranch, exact)
+	}
+	if !strings.HasSuffix(exact, " ") {
+		t.Errorf("exact-width branch left no trailing gap: %q", exact)
+	}
+	if !strings.Contains(exact, "…") {
+		t.Errorf("exact-width branch should be clipped with …: %q", exact)
 	}
 }
 
