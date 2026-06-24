@@ -547,18 +547,21 @@ func changesText(v *workspace.View) string {
 	return s
 }
 
-// fitBranch sizes a branch name to exactly the branch column: short names are
-// space-padded, and a name wider than the column is clipped with a trailing … so
-// an over-long branch can never push the columns after it out of alignment.
+// fitBranch sizes a branch name to exactly the branch column, always leaving at
+// least one trailing space so the STATE column never butts up against the name:
+// short names are space-padded, and a name that would fill or overflow the
+// column is clipped with a trailing … (then padded) so an over-long branch can
+// never push the columns after it out of alignment or touch them.
 func fitBranch(name string) string {
-	if lipgloss.Width(name) <= colBranch {
-		return fmt.Sprintf("%-*s", colBranch, name)
+	const maxName = colBranch - 1 // reserve a trailing space as the column gap
+	if lipgloss.Width(name) > maxName {
+		r := []rune(name)
+		for len(r) > 0 && lipgloss.Width(string(r))+1 > maxName {
+			r = r[:len(r)-1]
+		}
+		name = string(r) + "…"
 	}
-	r := []rune(name)
-	for len(r) > 0 && lipgloss.Width(string(r))+1 > colBranch {
-		r = r[:len(r)-1]
-	}
-	return string(r) + "…"
+	return fmt.Sprintf("%-*s", colBranch, name)
 }
 
 // pad right-pads s with spaces to a visible width of w (no-op if already wider).
