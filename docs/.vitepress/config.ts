@@ -84,6 +84,8 @@ function sidebar() {
         { text: 'Core Concepts', link: '/guide/concepts' },
         { text: 'The Dashboard', link: '/guide/dashboard' },
         { text: 'tmux Integration', link: '/guide/tmux' },
+        { text: 'Editors', link: '/guide/editors' },
+        { text: 'Agent Status', link: '/guide/agent-status' },
         { text: 'Configuration', link: '/guide/configuration' },
         { text: 'Shell Integration', link: '/guide/shell-integration' },
         { text: 'Architecture & Design', link: '/guide/architecture' },

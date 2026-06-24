@@ -16,13 +16,16 @@ every workspace belongs to one. Registering a repo just records its name and
 path in the [registry](#the-registry) — it never modifies the repo on disk.
 
 ```sh
-wf project add [path]     # register (default: current directory)
-wf project ls            # list projects with their workspace counts
-wf project rm <name>     # unregister (leaves the repo on disk)
+wf project add [path]        # register (default: current directory)
+wf project ls                # list projects with their workspace counts
+wf project rename <old> <new>  # rename (retargets its worktrees)
+wf project rm <name>         # unregister (leaves the repo on disk)
 ```
 
 A project's **name** defaults to the repo's directory name; if that's taken,
-WorkFlow appends `-2`, `-3`, and so on. Override it with `--name`.
+WorkFlow appends `-2`, `-3`, and so on. Override it with `--name`. Rename or
+unregister a project later from the command line or straight from the
+[dashboard](/guide/dashboard#managing-projects).
 
 ## Workspaces
 

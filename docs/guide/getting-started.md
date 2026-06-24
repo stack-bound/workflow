@@ -63,6 +63,14 @@ wf open feature-x          # inside tmux: jump to its window
                            # outside tmux: open the worktree in your editor
 ```
 
+To open it in an editor specifically — and pick which one — use `wf edit`. It
+discovers the editors installed on this machine and remembers your choice per
+repo; see [Editors](/guide/editors).
+
+```sh
+wf edit feature-x          # open in an editor (picker, or the repo default)
+```
+
 Prefer to `cd` into it in your current shell? Print the path:
 
 ```sh
@@ -100,7 +108,8 @@ wf project add                 # register the current repo as a project
 wf add feature-x               # create a branch + worktree (+ run setup)
 wf list                        # see every workspace with live git status
 wf path feature-x              # print the worktree path (for shell cd)
-wf open feature-x              # jump to its tmux window (or open in $EDITOR)
+wf open feature-x              # jump to its tmux window (or open in your editor)
+wf edit feature-x              # open it in an editor (pick one, remembered per repo)
 wf merge feature-x             # merge into base, then remove worktree + branch
 wf rm feature-x                # remove a workspace without merging
 ```

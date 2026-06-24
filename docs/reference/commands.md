@@ -49,6 +49,16 @@ wf project ls
 List registered projects with their workspace counts and paths. **Alias:**
 `wf project list`.
 
+### `wf project rename`
+
+```
+wf project rename <old> <new>
+```
+
+Rename a registered project and retarget its worktrees to the new name.
+**Alias:** `wf project mv`. (Also available from the dashboard — press
+<kbd>Enter</kbd> on a project header.)
+
 ### `wf project rm`
 
 ```
@@ -134,12 +144,32 @@ wf open <branch>
 ```
 
 Open a workspace. Inside tmux, jumps to its window (creating it on demand);
-otherwise opens the worktree in your editor.
+otherwise launches the workspace's default editor (repo `default_ide` → global
+`default_ide` → first detected). Use [`wf edit`](#wf-edit) to choose interactively.
 
 | Flag | Description |
 | --- | --- |
 | `-p, --project <name>` | Scope to a project when the branch is ambiguous |
 | `--editor` | Open in the editor even inside tmux |
+
+### `wf edit`
+
+```
+wf edit [branch]
+```
+
+Open a workspace in an editor or IDE. With no argument it opens the current
+directory; pass a branch to target another workspace. A picker lists the editors
+[detected](/guide/editors) on this machine (the repo's default first); pick one
+with the arrow keys and <kbd>Enter</kbd>. In the picker, <kbd>d</kbd> pins the
+highlighted editor as the repo default and <kbd>a</kbd> also enables autolaunch.
+When the repo has autolaunch set, its default opens straight away.
+
+| Flag | Description |
+| --- | --- |
+| `-p, --project <name>` | Scope to a project when the branch is ambiguous |
+| `-i, --pick` | Always show the picker, even when autolaunch is set |
+| `-l, --list` | List the editors detected on this machine (with their ids) and exit |
 
 ### `wf close`
 
@@ -225,6 +255,35 @@ wf sidebar
 Show a live strip of the workspace windows open right now — run it in a split
 pane. **Requires tmux.**
 
+## Agent status
+
+See [Agent Status](/guide/agent-status) for the full picture.
+
+### `wf hooks`
+
+```
+wf hooks install      # add the status hooks to ~/.claude/settings.json (idempotent)
+wf hooks uninstall    # remove WorkFlow's status hooks again
+wf hooks print        # print the hook JSON (for manual setup)
+```
+
+Manage the Claude Code lifecycle hooks that drive WorkFlow's live agent-status
+icons. The hooks call `wf set-status`; one global install covers every workspace.
+`install` and `uninstall` only ever touch WorkFlow's own entries, leaving your
+other hooks and settings untouched.
+
+### `wf set-status`
+
+```
+wf set-status <working|waiting|done>
+```
+
+Record the current workspace's agent status (inferred from the working
+directory), shown live in the tmux tab, dashboard, and sidebar. This is the
+target of the hooks installed by `wf hooks install` — you rarely run it by hand,
+but any agent that can run a command on its lifecycle events can call it. A no-op
+outside a registered worktree.
+
 ## Setup &amp; config
 
 ### `wf init`
@@ -245,7 +304,7 @@ and offer to register the repo.
 
 ```
 wf config path     # print the global config file path
-wf config show     # print the effective config (with the resolved editor)
+wf config show     # print the effective config (and the resolved editor command)
 wf config edit     # open the global config in your editor (creating it if needed)
 ```
 

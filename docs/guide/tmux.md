@@ -35,6 +35,14 @@ In the [dashboard](/guide/dashboard), <kbd>t</kbd> jumps to the selected
 workspace's window, and a **`▣`** marks any workspace whose window is open right
 now.
 
+## Agent status in the tab
+
+When a coding agent is running in a workspace, its window's tab shows a live
+**working / waiting / idle** icon and recolours to match — so you can see which
+workspace is busy or blocked on you from the tmux status line alone. Turn it on
+with `wf hooks install`; the [Agent Status](/guide/agent-status) guide covers the
+setup, the icons, and how to customise them.
+
 ## Resurrect
 
 tmux windows are *derived*, not persisted — the [registry](/guide/concepts#the-registry)
@@ -65,8 +73,8 @@ wf sidebar
 ```
 
 Unlike the dashboard (the full ledger of everything tracked), the sidebar shows
-only what's currently open. A status slot is reserved for future agent
-integration.
+only what's currently open, with each window's live [agent status](/guide/agent-status)
+beside it.
 
 ## Without tmux
 
@@ -81,9 +89,8 @@ Outside tmux, the window-only commands fall back gracefully:
 You still get the full worktree manager and dashboard — tmux just adds the
 window navigation on top.
 
-::: info Screenshots pending the TUI redesign
-Genuine tmux/sidebar captures will be added once the lipgloss redesign lands.
-Regenerate them with the procedure in
+::: info Captures
+Genuine tmux/sidebar captures can be generated with the procedure in
 [`docs/capture/`](https://github.com/stack-bound/workflow/tree/master/docs/capture)
 — capture targets: **`sidebar`**, **`tmux-windows`**.
 :::
