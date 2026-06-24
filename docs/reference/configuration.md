@@ -11,17 +11,26 @@ the [Configuration guide](/guide/configuration).
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| [`editor`](/guide/configuration#editor) | string | `$VISUAL` → `$EDITOR` → autodetect → `vi` | Editor for `wf open` / open-in-editor |
 | [`clipboard_cmd`](/guide/configuration#clipboard-cmd) | string | built-in clipboard | Copy command, run as `sh -c <cmd>` with the path on stdin |
 | [`default_base`](/guide/configuration#default-base) | string | detected default branch | Fallback base branch for new workspaces |
 | [`worktree_dir`](/guide/configuration#worktree-dir-global) | string | sibling `<repo>_worktrees` | Default base directory for all worktrees |
+| [`default_ide`](/guide/configuration#default-ide) | string | first detected editor | Fallback editor id for `wf edit` / `wf open` when a repo pins none ([Editors](/guide/editors)) |
+| [`ides`](/guide/configuration#ides) | list | none | Custom editors merged into the picker's catalog (`id`, `name`, `cmd`, `gui`) |
+| [`status`](/guide/configuration#status) | map | nerdfont defaults | [Agent-status](/guide/agent-status) icons/colours (`preset`, `color_mode`, `ttl`, `glyphs`, `colors`) |
 
 ```yaml
 # ~/.config/workFlow/config.yaml
-editor: code
 clipboard_cmd: "xclip -selection clipboard"
 default_base: development
 worktree_dir: ~/worktrees
+default_ide: code
+ides:
+  - id: lapce
+    name: Lapce
+    cmd: lapce
+    gui: true
+status:
+  preset: nerdfont
 ```
 
 ## Per-repo `.workFlow.yaml`
@@ -32,6 +41,8 @@ documented starter with `wf init`.
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
 | [`base`](/guide/configuration#base) | string | global/detected default | Default base branch for new workspaces in this repo |
+| [`default_ide`](/guide/configuration#default-ide-and-autolaunch) | string | global `default_ide` | Editor id `wf edit` prefers for this repo ([Editors](/guide/editors)) |
+| [`autolaunch`](/guide/configuration#default-ide-and-autolaunch) | bool | `false` | Open `default_ide` without showing the picker |
 | [`worktree_dir`](/guide/configuration#worktree-dir) | string | global setting, else sibling dir | Where this repo's worktrees are created (overrides global) |
 | [`setup`](/guide/configuration#setup) | list of strings | none | Commands run via `sh -c` in each new worktree after creation |
 | [`copy`](/guide/configuration#copy-and-symlink) | list of strings | none | Repo-root-relative files copied into each new worktree |
@@ -40,6 +51,8 @@ documented starter with `wf init`.
 ```yaml
 # .workFlow.yaml
 base: development
+# default_ide: goland
+# autolaunch: true
 # worktree_dir: ../myrepo_worktrees
 setup:
   - npm install

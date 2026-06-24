@@ -19,17 +19,17 @@ hero:
 features:
   - icon: 🌳
     title: A worktree per task
-    details: "wf add <branch> spins up a branch and an isolated git worktree as its own directory — run setup, copy and symlink files into it automatically. Switch tasks without stashing or rebuilding."
+    details: "wf add <branch> spins up a branch and an isolated git worktree as its own directory — run setup, copy and symlink files into it automatically, then open it in any editor wf finds installed. Switch tasks without stashing or rebuilding."
     link: /guide/getting-started
     linkText: Create your first workspace
   - icon: 📊
     title: Live cross-project dashboard
-    details: A TUI ledger of every project and its workspaces with live git status — ahead/behind, ±lines, dirty flag, and an active/clean state. Auto-refreshing, with a scrollable colorized diff viewer.
+    details: A TUI ledger of every project and its workspaces with live git status — ahead/behind, ±lines, dirty flag, and an active/clean state. Launch the trunk straight from its base row, manage projects, and review a scrollable colorized diff.
     link: /guide/dashboard
     linkText: Explore the dashboard
   - icon: 🪟
     title: tmux as a guest
-    details: Inside tmux, WorkFlow creates real windows in your current session — one per workspace — that you navigate with your own keys. It never wraps or owns your session, and works fine without tmux too.
+    details: Inside tmux, WorkFlow creates real windows in your current session — one per workspace — that you navigate with your own keys, each tab showing a live working/waiting agent icon. It never wraps or owns your session.
     link: /guide/tmux
     linkText: How tmux integration works
   - icon: ⌨️

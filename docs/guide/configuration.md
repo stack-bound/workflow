@@ -18,7 +18,7 @@ subcommands:
 
 ```sh
 wf config path     # print the config file path
-wf config show     # print the effective config (with the resolved editor)
+wf config show     # print the effective config (and the resolved editor command)
 wf config edit     # open it in your editor (creating it if needed)
 ```
 
@@ -26,24 +26,19 @@ wf config edit     # open it in your editor (creating it if needed)
 
 ```yaml
 # ~/.config/workFlow/config.yaml — all fields optional
-editor: code              # editor for `wf open` / open-in-editor
 clipboard_cmd: "xclip -selection clipboard"  # custom copy command
 default_base: development  # fallback base branch for new workspaces
 worktree_dir: ~/worktrees  # default base directory for all worktrees
+default_ide: code          # fallback editor when a repo pins no default_ide
+ides:                      # custom editors the picker can launch
+  - id: lapce
+    name: Lapce
+    cmd: lapce
+    gui: true
+status: {}                 # agent-status icons/colours (see Agent Status guide)
 ```
 
-#### `editor`
-
-The command used by `wf open` (outside tmux) and the dashboard's "open in
-editor" action. When empty, WorkFlow resolves an editor in this order:
-
-1. `editor` in this config,
-2. `$VISUAL`,
-3. `$EDITOR`,
-4. the first of `code`, `vim`, `vi`, `nano` found on your `PATH`,
-5. `vi` as a final fallback.
-
-#### `clipboard_cmd`
+#### `clipboard_cmd` {#clipboard-cmd}
 
 The command `wf copy` uses to put a path on your clipboard. When set, it's run as
 `sh -c <cmd>` with the path on **stdin** — so it must read stdin:
@@ -69,6 +64,28 @@ A default base directory for **all** worktrees. When empty, each repo's
 worktrees go in a sibling directory, `<repo>_worktrees`. A per-repo
 `worktree_dir` overrides this.
 
+#### `default_ide` {#default-ide}
+
+The fallback editor id for [`wf edit`](/guide/editors) (and `wf open` outside
+tmux) when the repo you're in pins no `default_ide` of its own. Use an id from
+`wf edit --list`. Pin it from the picker (press <kbd>d</kbd>) or set it by hand.
+See the [Editors guide](/guide/editors#default-ide).
+
+#### `ides`
+
+Custom editors merged into WorkFlow's built-in catalog, so the picker can launch
+an editor it doesn't ship with. Each entry takes an `id`, an optional `name`, the
+launch `cmd` (the target directory is appended), and `gui: true` for a windowed
+app that should launch detached. A custom `id` matching a built-in one overrides
+it. See [Custom editors](/guide/editors#custom-editors).
+
+#### `status`
+
+Tunes the live [agent-status](/guide/agent-status) icons and colours shown in
+tmux tabs, the dashboard, and the sidebar — the glyph preset, per-state glyph and
+colour overrides, the tmux tab-colour mode, and the staleness window. Absent
+means sensible defaults; see [Customising the icons](/guide/agent-status#customising-the-icons).
+
 ## Per-repo `.workFlow.yaml` {#per-repo-workflow-yaml}
 
 Drop a `.workFlow.yaml` at a repository's root to control how *that repo's*
@@ -93,6 +110,10 @@ the right `base:` instead of a hardcoded guess.
 # Default base branch for new workspaces in this repo.
 base: development
 
+# Default editor for `wf edit` in this repo (an id from `wf edit --list`).
+# default_ide: goland
+# autolaunch: true        # open it without showing the picker
+
 # Where worktrees for this repo are created.
 # Default: a sibling directory "<repo>_worktrees".
 # worktree_dir: ../myrepo_worktrees
@@ -115,6 +136,15 @@ symlink:
 
 The default base branch for new workspaces in this repo — second in the
 [resolution order](/guide/concepts#base-branch), after the `--base` flag.
+
+#### `default_ide` and `autolaunch` {#default-ide-and-autolaunch}
+
+The editor [`wf edit`](/guide/editors) prefers for this repo's workspaces, and
+whether to open it without the picker. `default_ide` is an editor id (from
+`wf edit --list`); with `autolaunch: true`, `wf edit` launches it straight away
+(use `--pick` to choose anyway). Pin both from the picker — <kbd>d</kbd> sets the
+default, <kbd>a</kbd> also enables autolaunch — or set them by hand. See the
+[Editors guide](/guide/editors#autolaunch).
 
 #### `worktree_dir` {#worktree-dir}
 

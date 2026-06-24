@@ -70,15 +70,21 @@ a command that expects the path as an argument).
 
 ## `wf open` opens the wrong editor
 
-Outside tmux (and for the dashboard's "open in editor" action), WorkFlow resolves
-your editor in order: the `editor` config value → `$VISUAL` → `$EDITOR` → the
-first of `code`, `vim`, `vi`, `nano` on your `PATH` → `vi`. Set it explicitly:
+WorkFlow no longer takes a single `editor` command — it [discovers the editors
+installed on this machine](/guide/editors) and launches your chosen default.
+Outside tmux, `wf open` (and the dashboard's edit key) use the resolved default:
+the repo's `default_ide` → the global `default_ide` → the first detected editor.
+Pick the one you want and pin it:
 
 ```sh
-wf config edit      # add:  editor: code
+wf edit             # opens the picker; press d to pin a default (a to autolaunch)
+wf edit --list      # see every detected editor and its id
 ```
 
-Check what's resolved with `wf config show` (it prints `# resolved editor: …`).
+Or set it by hand — `default_ide: <id>` in a repo's `.workFlow.yaml`, or in your
+[global config](/guide/configuration#default-ide). Check what's resolved with
+`wf config show` (it prints `# config editor: …`). If your editor isn't detected,
+add it under [`ides:`](/guide/editors#custom-editors).
 
 ## "workspace … is ambiguous"
 

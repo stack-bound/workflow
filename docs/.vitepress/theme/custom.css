@@ -69,6 +69,9 @@
   --term-del: #ff6b6b; /*    -removed  (red)    */
   --term-star: #f2c14e; /*    *         (yellow) */
   --term-proj: #c98bdb; /*   project    (magenta)*/
+  --term-work: #f2c14e; /*   working    (yellow) */
+  --term-wait: #ff6b6b; /*   waiting    (red)    */
+  --term-base: #4fd6c2; /*   ◆ base     (teal)   */
   --term-sel-bg: #2bb3c0; /* selected row bg (cyan)*/
 
   margin: 2.5rem auto 6rem;
@@ -133,6 +136,9 @@
 .t-add    { color: var(--term-add); }
 .t-del    { color: var(--term-del); }
 .t-star   { color: var(--term-star); }
+.t-work   { color: var(--term-work); }
+.t-wait   { color: var(--term-wait); }
+.t-base   { color: var(--term-base); font-weight: 700; }
 .t-legend { color: var(--term-dim); }
 .t-help   { color: var(--term-dim); }
 
