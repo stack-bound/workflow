@@ -178,15 +178,25 @@ func KillWindow(id string) error {
 // WindowName builds a window name with the status glyph prefixed:
 // "<glyph> <branch>". So the status icon sits inside the tab, in a fixed slot
 // just after tmux's index, and the layout never shifts (an empty glyph yields
-// just the branch). In color_mode "glyph" with a color set, only the glyph is
-// wrapped in an inline tmux style ("#[fg=colourN]<glyph>#[default] <branch>");
-// note inline styles inside a window name are tmux-version-sensitive, which is
-// why "tab" is the default mode. It is pure so it is unit-testable.
+// just the branch).
+//
+// Whenever a color is set and the mode isn't "none", the glyph is wrapped in an
+// inline tmux style ("#[fg=colourN]<glyph>#[default] <branch>") so the icon
+// itself always carries its state colour — the SAME ANSI-256 number the
+// dashboard/sidebar render the glyph with, so the tab icon and the dashboard
+// icon match. This holds in "tab" mode too: the whole-tab tint from TabStyleOps
+// is overridden by a user's own status-bar format (e.g. a powerline theme that
+// sets window-status-format with explicit colours), which would otherwise leave
+// the icon uncoloured; the inline style on the glyph survives that. The branch
+// text after #[default] reverts to the surrounding tab style, so "tab" mode
+// still tints the whole tab. Inline styles in a window name are interpreted by
+// tmux when it expands #W (modern-tmux behaviour). It is pure so it is
+// unit-testable.
 func WindowName(glyph, branch, mode, color string) string {
 	if glyph == "" {
 		return branch
 	}
-	if mode == "glyph" && color != "" {
+	if mode != "none" && color != "" {
 		return fmt.Sprintf("#[fg=colour%s]%s#[default] %s", color, glyph, branch)
 	}
 	return glyph + " " + branch

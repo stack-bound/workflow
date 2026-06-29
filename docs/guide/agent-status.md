@@ -49,9 +49,11 @@ crashed or detached agent doesn't leave a window looking busy forever.
 
 ## Where it shows
 
-- **tmux tab** — the icon is prefixed to the workspace window's name and, by
-  default, the whole tab is recoloured for the state (yellow working, red
-  waiting), reverting on idle.
+- **tmux tab** — the icon is prefixed to the workspace window's name and always
+  carries the state's colour (yellow working, red waiting), so it matches the
+  dashboard glyph even when your own status-bar theme (e.g. a powerline format)
+  styles the tab. By default the whole tab is recoloured for the state on top of
+  that. It reverts on idle.
 - **[Dashboard](/guide/dashboard)** — an agent-status column on each workspace
   row, with the working/waiting glyphs called out in the legend. Idle rows leave
   the cell blank.
@@ -89,7 +91,7 @@ field is optional.
 # ~/.config/workFlow/config.yaml
 status:
   preset: nerdfont        # glyph set: nerdfont (default), emoji, or ascii
-  color_mode: tab         # how tmux colours the tab: tab (default), glyph, or none
+  color_mode: tab         # extra tab colouring: tab (default, whole tab), glyph (icon only), or none
   ttl: 5m                 # how long working/waiting stays "live" before idle (default 5m)
   glyphs:                 # override individual state glyphs
     working: "🤖"
@@ -103,7 +105,7 @@ status:
 | Field | Default | What it does |
 | --- | --- | --- |
 | `preset` | `nerdfont` | Built-in glyph set: `nerdfont`, `emoji` (🤖 ⏳ 🌿), or `ascii` (`*` `?` `-`) |
-| `color_mode` | `tab` | tmux tab colouring: `tab` (whole tab), `glyph` (icon only), or `none` |
+| `color_mode` | `tab` | Extra tab colouring on top of the always-coloured icon: `tab` (whole tab), `glyph` (icon only), or `none` |
 | `ttl` | `5m` | How long a working/waiting status stays live before it reads as idle (any Go duration, e.g. `90s`, `10m`) |
 | `glyphs` | preset | Per-state glyph overrides (`working` / `waiting` / `idle`) |
 | `colors` | yellow / red / none | Per-state colour overrides as ANSI-256 numbers |

@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - ""
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - "tmux tab status icons now always carry their state colour (yellow working, red waiting) so they match the dashboard glyph, even when a custom status-bar theme (e.g. a powerline `window-status-format`) overrides the whole-tab tint"
+security:
+  - ""
+yanked:
+  - ""
