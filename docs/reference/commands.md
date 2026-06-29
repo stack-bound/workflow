@@ -275,14 +275,26 @@ other hooks and settings untouched.
 ### `wf set-status`
 
 ```
-wf set-status <working|waiting|done>
+wf set-status <working|waiting|ready|done>
 ```
 
-Record the current workspace's agent status (inferred from the working
-directory), shown live in the tmux tab, dashboard, and sidebar. This is the
-target of the hooks installed by `wf hooks install` — you rarely run it by hand,
-but any agent that can run a command on its lifecycle events can call it. A no-op
-outside a registered worktree.
+Record the current agent's status (inferred from the hook's working directory,
+read from stdin JSON with a fallback to the process working directory), shown
+live in the tmux tab, dashboard, and sidebar, and decorate the agent's current
+tmux window. This is the target of the hooks installed by `wf hooks install` —
+you rarely run it by hand, but any agent that can run a command on its lifecycle
+events can call it.
+
+### `wf status reset`
+
+```
+wf status reset
+```
+
+Revert any borrowed tmux tabs WorkFlow decorated but left behind — the escape
+hatch for the rare case where an agent's session was killed outright (so its
+`SessionEnd` hook never fired) and the tab was never reused. Restores each tab's
+original name and `automatic-rename`. Owned worktree/base windows are untouched.
 
 ## Setup &amp; config
 

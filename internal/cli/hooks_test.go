@@ -32,10 +32,10 @@ func countSetStatus(t *testing.T, settings map[string]any) (count int, events ma
 func TestMergeHooksFromEmpty(t *testing.T) {
 	s := mergeHooks(map[string]any{}, "/usr/local/bin/wf")
 	count, events := countSetStatus(t, s)
-	if count != 4 {
-		t.Fatalf("got %d set-status entries, want 4", count)
+	if count != 5 {
+		t.Fatalf("got %d set-status entries, want 5", count)
 	}
-	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
+	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"} {
 		if events[ev] != 1 {
 			t.Errorf("event %s has %d entries, want 1", ev, events[ev])
 		}
@@ -46,11 +46,41 @@ func TestMergeHooksFromEmpty(t *testing.T) {
 	}
 }
 
+// The "your turn" / teardown remap is the heart of this feature: Stop now drives
+// ready (not done), and a new SessionEnd hook drives done.
+func TestMergeHooksStopAndSessionEnd(t *testing.T) {
+	s := mergeHooks(map[string]any{}, "/bin/wf")
+	if got := setStatusCmdFor(t, s, "Stop"); !strings.Contains(got, "set-status ready") {
+		t.Errorf("Stop hook = %q, want it to call set-status ready", got)
+	}
+	if got := setStatusCmdFor(t, s, "SessionEnd"); !strings.Contains(got, "set-status done") {
+		t.Errorf("SessionEnd hook = %q, want it to call set-status done", got)
+	}
+}
+
+// setStatusCmdFor returns the set-status command string wf installed under event.
+func setStatusCmdFor(t *testing.T, settings map[string]any, event string) string {
+	t.Helper()
+	hooks, _ := settings["hooks"].(map[string]any)
+	groups, _ := hooks[event].([]any)
+	for _, graw := range groups {
+		g, _ := graw.(map[string]any)
+		entries, _ := g["hooks"].([]any)
+		for _, eraw := range entries {
+			e, _ := eraw.(map[string]any)
+			if c, _ := e["command"].(string); strings.Contains(c, "set-status") {
+				return c
+			}
+		}
+	}
+	return ""
+}
+
 func TestMergeHooksIdempotent(t *testing.T) {
 	s := mergeHooks(map[string]any{}, "/bin/wf")
 	s = mergeHooks(s, "/bin/wf")
-	if count, _ := countSetStatus(t, s); count != 4 {
-		t.Errorf("after double merge got %d entries, want 4 (no duplicates)", count)
+	if count, _ := countSetStatus(t, s); count != 5 {
+		t.Errorf("after double merge got %d entries, want 5 (no duplicates)", count)
 	}
 }
 
@@ -159,8 +189,8 @@ func TestHooksInstallUninstallCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load after install: %v", err)
 	}
-	if count, _ := countSetStatus(t, settings); count != 4 {
-		t.Errorf("installed entries = %d, want 4", count)
+	if count, _ := countSetStatus(t, settings); count != 5 {
+		t.Errorf("installed entries = %d, want 5", count)
 	}
 
 	if _, err := execWF(t, "hooks", "uninstall"); err != nil {

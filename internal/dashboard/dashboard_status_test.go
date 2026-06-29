@@ -119,6 +119,58 @@ func TestWatchAndListenStatus(t *testing.T) {
 	}
 }
 
+// The base/root checkout now carries agent status: a base status file (keyed by
+// the project-root path) lights up the agent cell on the base row, and readStatuses
+// surfaces it under that path.
+func TestMainRowShowsAgentCell(t *testing.T) {
+	ready := (&config.Global{}).StatusLook().Look["ready"].Glyph
+	projects := []workspace.ProjectView{{
+		Project: registry.Project{Name: "p", Path: "/repo/p"},
+		Main:    workspace.MainCheckout{Branch: "main"},
+		Workspaces: []workspace.View{
+			{Worktree: registry.Worktree{Project: "p", Branch: "feat", Path: "/wt/feat", Base: "main"}},
+		},
+	}}
+
+	m := New(nil, nil)
+	m, _ = step(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m, _ = step(m, ledgerMsg{
+		projects: projects,
+		statuses: map[string]status.State{"/repo/p": status.Ready},
+	})
+	// Row 1 is the base/main row (row 0 is the project header).
+	if row := m.renderRow(1, m.rows[1]); !strings.Contains(row, ready) {
+		t.Errorf("base row missing ready glyph %q: %q", ready, row)
+	}
+
+	// With no base status the cell stays blank (no stray glyph).
+	m2 := New(nil, nil)
+	m2, _ = step(m2, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m2, _ = step(m2, ledgerMsg{projects: projects})
+	if row := m2.renderRow(1, m2.rows[1]); strings.Contains(row, ready) {
+		t.Errorf("idle base row should not show a glyph: %q", row)
+	}
+}
+
+func TestReadStatusesIncludesBase(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := status.WriteBase("p", "/repo/p", status.Ready); err != nil {
+		t.Fatal(err)
+	}
+	projects := []workspace.ProjectView{{Project: registry.Project{Name: "p", Path: "/repo/p"}}}
+	got := readStatuses(projects, 30*time.Minute)
+	if got["/repo/p"] != status.Ready {
+		t.Errorf("base status = %q, want ready", got["/repo/p"])
+	}
+}
+
+func TestLegendIncludesReady(t *testing.T) {
+	ready := (&config.Global{}).StatusLook().Look["ready"].Glyph
+	if got := New(nil, nil).ledgerLegend(); !strings.Contains(got, ready) {
+		t.Errorf("legend missing ready glyph %q: %q", ready, got)
+	}
+}
+
 func TestReadStatuses(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := status.Write("p", "feat", "/wt/feat", status.Working); err != nil {

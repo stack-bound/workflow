@@ -30,15 +30,20 @@ import (
 type State string
 
 const (
-	// Idle is the resting state (also what "done" maps to): no agent working.
+	// Idle is the resting state (also what the hook's "done"/SessionEnd maps to):
+	// no agent session here.
 	Idle State = "idle"
 	// Working means an agent is actively running.
 	Working State = "working"
-	// Waiting means an agent is blocked on user input.
+	// Waiting means an agent is blocked on user input mid-turn (a permission or
+	// elicitation prompt).
 	Waiting State = "waiting"
+	// Ready means an agent finished its turn and is parked for your reply ("your
+	// turn"). Distinct from Idle, which is "no session at all".
+	Ready State = "ready"
 )
 
-// Normalize maps a raw state string (including the hook's "done") to a State,
+// Normalize maps a raw state string (including the hooks' "done") to a State,
 // defaulting unknown values to Idle so a bad hook argument is harmless.
 func Normalize(s string) State {
 	switch strings.ToLower(strings.TrimSpace(s)) {
@@ -46,6 +51,8 @@ func Normalize(s string) State {
 		return Working
 	case "waiting":
 		return Waiting
+	case "ready":
+		return Ready
 	default: // "idle", "done", "", and anything unexpected
 		return Idle
 	}
@@ -132,6 +139,23 @@ func FileFor(project, branch, worktreePath string) (string, error) {
 	return FileForKey(Key(project, branch, worktreePath))
 }
 
+// baseBranch is the sentinel branch component for a project's base/root
+// checkout: empty, so the key is the project slug + the root path hash with no
+// branch part. Write (set-status) and read (dashboard) both route through
+// WriteBase/ReadBase so they agree on this key without a git call.
+const baseBranch = ""
+
+// WriteBase records the agent status for a project's base/root checkout, keyed
+// by the project root path with an empty branch component.
+func WriteBase(project, projectPath string, st State) error {
+	return Write(project, baseBranch, projectPath, st)
+}
+
+// ReadBase reads a project's base/root checkout status (the mirror of WriteBase).
+func ReadBase(project, projectPath string) (Status, bool, error) {
+	return ReadFor(project, baseBranch, projectPath)
+}
+
 // Write records a workspace's state, stamping the current time. The write is
 // atomic (temp file + rename), mirroring registry.Save.
 func Write(project, branch, worktreePath string, st State) error {
@@ -191,12 +215,18 @@ func Remove(project, branch, worktreePath string) error {
 	return nil
 }
 
-// Effective applies the staleness rule at render time: a working/waiting status
-// older than ttl is treated as Idle (the agent likely died, slept, or its Stop
-// hook never fired). Idle is always Idle; ttl <= 0 disables the downgrade.
+// Effective applies the staleness rule at render time — but only to Working.
+// Working self-refreshes on every PostToolUse, so a stale Working means the
+// agent died mid-tool (or a single tool ran longer than the TTL): downgrade it
+// to Idle. Waiting and Ready never restamp by nature (they mark "needs you"),
+// so any TTL on them is a false clear — they persist until the next state
+// change or SessionEnd. Idle is always Idle; ttl <= 0 disables the downgrade.
 func Effective(st State, ts int64, ttl time.Duration, now time.Time) State {
 	if st == Idle {
 		return Idle
+	}
+	if st != Working {
+		return st // waiting/ready persist
 	}
 	if ttl <= 0 {
 		return st

@@ -250,6 +250,7 @@ func (m Model) ledgerLegend() string {
 	parts := []string{
 		legendGlyph(look.Look["working"]) + helpStyle.Render(" working"),
 		legendGlyph(look.Look["waiting"]) + helpStyle.Render(" waiting"),
+		legendGlyph(look.Look["ready"]) + helpStyle.Render(" ready"),
 		activeStyle.Render("●") + helpStyle.Render(" active"),
 		cleanStyle.Render("○") + helpStyle.Render(" clean"),
 		tmuxStyle.Render("▣") + helpStyle.Render(" tmux open"),
@@ -344,11 +345,11 @@ const mainMarker = "◆  "
 
 // renderMainRow draws a project's base/main checkout on its own line, in the
 // same aligned columns as the worktree rows below it: a ◆ marker (where a
-// worktree has its tree connector), a blank agent cell (the base has no agent),
-// then the branch the root is on and its clean/dirty state. The base has no
-// ahead/behind, diff, or base columns, so those are left blank. It is the launch
-// target for the base branch (t/e/o/enter/c), so the open indicator shows when
-// its root window is up.
+// worktree has its tree connector), the agent-status cell (an agent working at
+// the project root now lights it up), then the branch the root is on and its
+// clean/dirty state. The base has no ahead/behind, diff, or base columns, so
+// those are left blank. It is the launch target for the base branch
+// (t/e/o/enter/c), so the open indicator shows when its root window is up.
 func (m Model) renderMainRow(i int, r row) string {
 	selected := i == m.cursor
 	open := m.openPaths[r.projectPath]
@@ -360,14 +361,25 @@ func (m Model) renderMainRow(i int, r row) string {
 
 	var left string
 	if selected {
-		left = cursor + accentBar.Render(mainMarker) + "  " + selectedStyle.Render(mainLine(r.main))
+		left = cursor + accentBar.Render(mainMarker) + agentCell(m.mainAgentLook(r), false) + selectedStyle.Render(mainLine(r.main))
 	} else {
-		left = cursor + accentBar.Render(mainMarker) + "  " + mainStyled(r.main)
+		left = cursor + accentBar.Render(mainMarker) + agentCell(m.mainAgentLook(r), true) + mainStyled(r.main)
 	}
 	if open {
 		left += " " + tmuxStyle.Render("▣")
 	}
 	return left
+}
+
+// mainAgentLook returns the resolved Look for a base/root checkout's effective
+// agent status, keyed by the project-root path. Like agentLook it yields a blank
+// (zero) Look for an idle/absent agent so the cell stays empty.
+func (m Model) mainAgentLook(r row) config.Look {
+	st, ok := m.statuses[r.projectPath]
+	if !ok || st == status.Idle {
+		return config.Look{}
+	}
+	return m.global.StatusLook().Look[string(st)]
 }
 
 // padPath right-aligns the dim, home-shortened project path to the terminal

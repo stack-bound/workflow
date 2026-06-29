@@ -16,11 +16,13 @@ import (
 //
 //	UserPromptSubmit / PostToolUse  -> working
 //	Notification (permission_prompt|elicitation_dialog) -> waiting
-//	Stop -> done (idle)
+//	Stop -> ready ("your turn", end of every turn)
+//	SessionEnd -> done (revert/idle, session teardown)
 //
-// `wf set-status` infers the workspace from the cwd and no-ops outside a wf
-// worktree, so a single global install safely covers every current and future
-// workspace without touching anything else.
+// `wf set-status` infers the workspace from the hook's cwd and decorates the
+// agent's current tmux window, so a single global install safely covers every
+// current and future workspace — and any borrowed tab — without touching
+// anything else.
 
 // desiredHook is one hook wf manages.
 type desiredHook struct {
@@ -34,7 +36,8 @@ func desiredHooks() []desiredHook {
 		{"UserPromptSubmit", "", "working"},
 		{"PostToolUse", "", "working"},
 		{"Notification", "permission_prompt|elicitation_dialog", "waiting"},
-		{"Stop", "", "done"},
+		{"Stop", "", "ready"},
+		{"SessionEnd", "", "done"},
 	}
 }
 

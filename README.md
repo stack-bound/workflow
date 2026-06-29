@@ -134,8 +134,12 @@ commands report that no tmux session was detected.
 
 ## Agent status
 
-WorkFlow shows, live, when an agent is **working**, **waiting on you**, or
-**idle** in each workspace — in the tmux tab, the dashboard, and the sidebar.
+WorkFlow shows, live, when an agent is **working**, **waiting on you**,
+**ready** ("your turn"), or **idle** — in the tmux tab, the dashboard, and the
+sidebar. It decorates **every** tab the agent is in: a worktree window WorkFlow
+opened, the project's base checkout, or a tab you started by hand in some
+unrelated directory. A tab WorkFlow doesn't own is reverted to exactly its prior
+state (name + `automatic-rename`) when the session ends.
 
 Install the Claude Code hooks once:
 
@@ -151,14 +155,16 @@ does nothing outside a registered worktree). It works with any agent that can ru
 a command on its lifecycle events — not just Claude Code.
 
 - **tmux:** the status icon lives *inside* the tab (prefixed to the window name,
-  e.g. `1 🤖 feat`), and the whole tab recolors while working/waiting, reverting
-  to your theme when idle.
-- **Dashboard:** a status glyph next to working/waiting workspaces, updated
-  instantly (no refresh needed).
+  e.g. `1 🤖 feat`), and the whole tab recolors while working/waiting/ready,
+  reverting to your theme when idle.
+- **Dashboard:** a status glyph next to working/waiting/ready workspaces — and on
+  the base/root checkout row — updated instantly (no refresh needed).
 - **Sidebar:** the same glyph in its live strip.
 
-A stale `working`/`waiting` (an agent that died without firing its `Stop` hook)
-self-heals back to idle after a configurable TTL (default 5m).
+Only a stale `working` (an agent that died mid-tool) self-heals back to idle
+after a configurable TTL (default 30m); `waiting`/`ready` persist until you act
+or the session ends. A killed-outright tab can be cleaned up with `wf status
+reset`.
 
 ## Configuration
 
@@ -183,12 +189,14 @@ self-heals back to idle after a configurable TTL (default 5m).
   status:
     preset: nerdfont       # nerdfont (default) | emoji | ascii
     color_mode: tab        # tab (whole tab) | glyph (icon only) | none
-    ttl: 5m                # a working/waiting older than this shows as idle
+    scope: all             # all (any tab) | wf (only registered worktrees/bases)
+    ttl: 30m               # a working status older than this shows as idle
     glyphs:                # optional per-state glyph overrides
       working: "🤖"
     colors:                # optional per-state ANSI-256 colors
       working: "11"
       waiting: "9"
+      ready: "10"
   ```
 - **Per-repo** — optional `.workFlow.yaml` at the repo root. Run `wf init` for a
   documented example:

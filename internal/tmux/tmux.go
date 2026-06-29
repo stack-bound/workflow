@@ -244,10 +244,181 @@ func ApplyWindowStyle(id string, ops []StyleOp) error {
 }
 
 // CurrentWindowID returns the window id containing the caller's pane
-// ($TMUX_PANE), used as a fallback when a workspace's window is not tagged.
+// ($TMUX_PANE) — the window an agent's hook fired in, which is the window
+// `set-status` decorates. Falls back to the session's active window when no
+// pane is in the environment.
 func CurrentWindowID() (string, error) {
 	if pane := os.Getenv("TMUX_PANE"); pane != "" {
 		return run("display-message", "-p", "-t", pane, "#{window_id}")
 	}
 	return run("display-message", "-p", "#{window_id}")
+}
+
+// prevNameOption and prevAutoRenameOption are the per-window markers wf snapshots
+// onto a *borrowed* window (one wf did not open, so it has no @wf_workspace) the
+// first time it decorates it, so the window can be reverted to exactly its prior
+// state when the agent's session ends. prevAutoRenameOption is also the
+// "have we adopted this window?" sentinel — it is always non-empty once set
+// (AutoRenameSnapshot never returns "").
+const (
+	prevNameOption       = "@wf_prev_name"
+	prevAutoRenameOption = "@wf_prev_autorename"
+)
+
+// GetWindowOption reads a per-window user option (e.g. @wf_workspace) via a
+// format query, returning "" when it is unset (tmux renders an unset @option as
+// the empty string).
+func GetWindowOption(id, option string) (string, error) {
+	return run("display-message", "-p", "-t", id, "#{"+option+"}")
+}
+
+// GetWindowName returns a window's current name.
+func GetWindowName(id string) (string, error) {
+	return run("display-message", "-p", "-t", id, "#{window_name}")
+}
+
+// WindowOwned reports whether the window is one wf opened — i.e. it carries the
+// @wf_workspace tag (a worktree or a project base). An untagged window is
+// "borrowed" (an agent started by hand in some directory).
+func WindowOwned(id string) bool {
+	v, err := GetWindowOption(id, workspaceOption)
+	return err == nil && v != ""
+}
+
+// StripGlyph removes a leading status glyph (one of glyphs) and its trailing
+// space from a window name, so the name can be rebuilt with a new glyph without
+// stacking ("🤖 feat" → "feat" → "🔔 feat"). It also unwraps a glyph-mode inline
+// style prefix ("#[fg=colourN]<glyph>#[default] rest" → "rest"). At most one
+// glyph is stripped; a name with no known leading glyph is returned unchanged.
+// Pure.
+//
+// Note (ascii preset): strip requires the trailing space the decoration adds,
+// so a bare "*scratch*" is safe — but a borrowed name shaped like a decorated
+// one ("* scratch") is mis-stripped in the label. The true original is preserved
+// separately in @wf_prev_name, so revert is unaffected.
+func StripGlyph(name string, glyphs []string) string {
+	if strings.HasPrefix(name, "#[") {
+		const reset = "#[default] "
+		if i := strings.Index(name, reset); i >= 0 {
+			return name[i+len(reset):]
+		}
+	}
+	for _, g := range glyphs {
+		if g == "" {
+			continue
+		}
+		if name == g {
+			return ""
+		}
+		if strings.HasPrefix(name, g+" ") {
+			return name[len(g)+1:]
+		}
+	}
+	return name
+}
+
+// AutoRenameSnapshot reads a window's automatic-rename in a restorable form:
+// "on"/"off" when it is set at the window level, or "inherit" when the window
+// has no per-window override (so RestoreAutoRename can unset it again). It never
+// returns "", so a stored snapshot doubles as an "already adopted?" sentinel.
+func AutoRenameSnapshot(id string) (string, error) {
+	// show-window-options prints "automatic-rename off" when set at the window
+	// level, and nothing when the window inherits the value.
+	out, err := run("show-window-options", "-t", id, "automatic-rename")
+	if err != nil {
+		return "", err
+	}
+	if f := strings.Fields(out); len(f) >= 2 {
+		return f[len(f)-1], nil
+	}
+	return "inherit", nil
+}
+
+// RestoreAutoRename reverts automatic-rename from an AutoRenameSnapshot value:
+// "inherit" (or "") unsets the per-window override so the window inherits again;
+// "on"/"off" set it explicitly.
+func RestoreAutoRename(id, snap string) error {
+	if snap == "inherit" || snap == "" {
+		_, err := run("set-window-option", "-u", "-t", id, "automatic-rename")
+		return err
+	}
+	_, err := run("set-window-option", "-t", id, "automatic-rename", snap)
+	return err
+}
+
+// AdoptWindow snapshots a borrowed window's original name and automatic-rename
+// (once) and pins automatic-rename off so wf's decoration is not immediately
+// overwritten by tmux's process-name tracking. Idempotent: a window already
+// adopted keeps its first (true) snapshot, so a re-used stale tab still reverts
+// to the real original. Best-effort.
+func AdoptWindow(id string) {
+	if snap, _ := GetWindowOption(id, prevAutoRenameOption); snap != "" {
+		return // already adopted
+	}
+	name, _ := GetWindowName(id)
+	auto, err := AutoRenameSnapshot(id)
+	if err != nil || auto == "" {
+		auto = "inherit"
+	}
+	_, _ = run("set-window-option", "-t", id, prevNameOption, name)
+	_, _ = run("set-window-option", "-t", id, prevAutoRenameOption, auto)
+	_, _ = run("set-window-option", "-t", id, "automatic-rename", "off")
+}
+
+// AdoptedSnapshot reads the revert markers wf stored on a borrowed window.
+// adopted is true when the window currently carries wf's decoration, so it
+// should be reverted on done / by `status reset`.
+func AdoptedSnapshot(id string) (prevName, autoSnap string, adopted bool) {
+	autoSnap, _ = GetWindowOption(id, prevAutoRenameOption)
+	if autoSnap == "" {
+		return "", "", false
+	}
+	prevName, _ = GetWindowOption(id, prevNameOption)
+	return prevName, autoSnap, true
+}
+
+// RevertWindow restores a borrowed window wf decorated to its pre-decoration
+// state: its original name and automatic-rename, with wf's markers and any
+// whole-tab style override cleared. Best-effort; harmless on a window that was
+// never decorated.
+func RevertWindow(id, prevName, autoSnap string) {
+	// Drop any whole-tab colour wf layered on (unset → inherit the theme again).
+	_ = ApplyWindowStyle(id, []StyleOp{
+		{Option: "window-status-style", Unset: true},
+		{Option: "window-status-current-style", Unset: true},
+	})
+	_ = RenameWindow(id, prevName)
+	_ = RestoreAutoRename(id, autoSnap)
+	_, _ = run("set-window-option", "-u", "-t", id, prevNameOption)
+	_, _ = run("set-window-option", "-u", "-t", id, prevAutoRenameOption)
+}
+
+// AdoptedWindow is a borrowed window wf decorated, with the markers needed to
+// revert it. `status reset` sweeps these across the whole server.
+type AdoptedWindow struct {
+	ID       string
+	PrevName string
+	AutoSnap string
+}
+
+// AdoptedWindows lists every window on the server (all sessions) that currently
+// carries wf's borrowed-decoration markers — the orphans `status reset` reverts.
+func AdoptedWindows() ([]AdoptedWindow, error) {
+	const f = "#{window_id}\t#{" + prevAutoRenameOption + "}\t#{" + prevNameOption + "}"
+	out, err := run("list-windows", "-a", "-F", f)
+	if err != nil {
+		return nil, err
+	}
+	var ws []AdoptedWindow
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 || parts[1] == "" {
+			continue // not adopted
+		}
+		ws = append(ws, AdoptedWindow{ID: parts[0], AutoSnap: parts[1], PrevName: parts[2]})
+	}
+	return ws, nil
 }

@@ -255,11 +255,19 @@ func (m Model) refreshCmd() tea.Cmd {
 }
 
 // readStatuses reads each workspace's status file and resolves it through the
-// TTL so a stale working/waiting renders as idle.
+// TTL so a stale working status renders as idle (waiting/ready persist). It also
+// reads each project's base/root checkout, keyed by the project-root path — the
+// same key set-status writes — so the base row can show an agent working at the
+// project root.
 func readStatuses(projects []workspace.ProjectView, ttl time.Duration) map[string]status.State {
 	now := time.Now()
 	out := make(map[string]status.State)
 	for _, pv := range projects {
+		if root := pv.Project.Path; root != "" {
+			if st, ok, err := status.ReadBase(pv.Project.Name, root); err == nil && ok {
+				out[root] = status.Effective(st.State, st.TS, ttl, now)
+			}
+		}
 		for _, v := range pv.Workspaces {
 			wt := v.Worktree
 			st, ok, err := status.ReadFor(wt.Project, wt.Branch, wt.Path)

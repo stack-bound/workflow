@@ -12,10 +12,11 @@ type Look struct {
 }
 
 // ResolvedStatus is the fully-resolved status presentation: a Look per state,
-// the tmux color mode, and the staleness TTL.
+// the tmux color mode, the decoration scope, and the staleness TTL.
 type ResolvedStatus struct {
-	Look      map[string]Look // keyed by state string: idle | working | waiting
+	Look      map[string]Look // keyed by state string: idle | working | waiting | ready
 	ColorMode string          // tab | glyph | none
+	Scope     string          // all | wf
 	TTL       time.Duration
 }
 
@@ -28,10 +29,15 @@ type StatusConfig struct {
 	// ColorMode is how the tmux tab is colored: tab (default, whole tab), glyph
 	// (inline color on the icon only), or none.
 	ColorMode string `yaml:"color_mode,omitempty"`
-	// TTL is how long a working/waiting status stays "live" before being shown as
-	// idle (default 5m). Any Go duration string, e.g. "90s", "10m".
+	// Scope limits which tmux tabs get decorated: all (default — the current
+	// window for any agent, anywhere) or wf (only when cwd resolves to a
+	// registered worktree or project base, leaving unrelated tabs untouched).
+	Scope string `yaml:"scope,omitempty"`
+	// TTL is how long a working status stays "live" before being shown as idle
+	// (default 30m). Only working ages out — waiting/ready persist. Any Go
+	// duration string, e.g. "90s", "10m"; <= 0 disables the downgrade.
 	TTL string `yaml:"ttl,omitempty"`
-	// Glyphs overrides individual state glyphs (keys: idle/working/waiting).
+	// Glyphs overrides individual state glyphs (keys: idle/working/waiting/ready).
 	Glyphs map[string]string `yaml:"glyphs,omitempty"`
 	// Colors overrides individual state colors as ANSI-256 numbers (as strings).
 	Colors map[string]string `yaml:"colors,omitempty"`
@@ -41,10 +47,19 @@ const (
 	stateIdle    = "idle"
 	stateWorking = "working"
 	stateWaiting = "waiting"
+	stateReady   = "ready"
+
+	scopeAll = "all"
+	scopeWF  = "wf"
+
+	// ScopeWF is the resolved "wf" scope value (decorate only registered
+	// worktrees/bases), exported so callers can branch on ResolvedStatus.Scope.
+	ScopeWF = scopeWF
 
 	defaultPreset    = "nerdfont"
 	defaultColorMode = "tab"
-	defaultTTL       = 5 * time.Minute
+	defaultScope     = scopeAll
+	defaultTTL       = 30 * time.Minute
 )
 
 // presets are the built-in glyph sets. Idle is always a branch-like glyph so a
@@ -56,16 +71,19 @@ var presets = map[string]map[string]string{
 		stateIdle:    "",          // powerline branch
 		stateWorking: "\U000f06a9", // md robot
 		stateWaiting: "",          // fa hourglass
+		stateReady:   "\uf0f3",     // fa bell ("your turn")
 	},
 	"emoji": {
 		stateIdle:    "🌿",
 		stateWorking: "🤖",
 		stateWaiting: "⏳",
+		stateReady:   "🔔",
 	},
 	"ascii": {
 		stateIdle:    "-",
 		stateWorking: "*",
 		stateWaiting: "?",
+		stateReady:   "!",
 	},
 }
 
@@ -76,10 +94,15 @@ var defaultColors = map[string]string{
 	stateIdle:    "",
 	stateWorking: "11", // bright yellow
 	stateWaiting: "9",  // bright red
+	stateReady:   "10", // bright green ("your turn")
 }
 
 func validColorMode(m string) bool {
 	return m == "tab" || m == "glyph" || m == "none"
+}
+
+func validScope(s string) bool {
+	return s == scopeAll || s == scopeWF
 }
 
 // Resolve produces the effective status presentation, layering per-state
@@ -93,8 +116,8 @@ func (c *StatusConfig) Resolve() ResolvedStatus {
 	if !ok {
 		glyphs = presets[defaultPreset]
 	}
-	look := make(map[string]Look, 3)
-	for _, st := range []string{stateIdle, stateWorking, stateWaiting} {
+	look := make(map[string]Look, 4)
+	for _, st := range []string{stateIdle, stateWorking, stateWaiting, stateReady} {
 		g := glyphs[st]
 		if ov, ok := c.Glyphs[st]; ok {
 			g = ov
@@ -111,6 +134,11 @@ func (c *StatusConfig) Resolve() ResolvedStatus {
 		mode = defaultColorMode
 	}
 
+	scope := c.Scope
+	if !validScope(scope) {
+		scope = defaultScope
+	}
+
 	ttl := defaultTTL
 	if c.TTL != "" {
 		if d, err := time.ParseDuration(c.TTL); err == nil {
@@ -118,7 +146,7 @@ func (c *StatusConfig) Resolve() ResolvedStatus {
 		}
 	}
 
-	return ResolvedStatus{Look: look, ColorMode: mode, TTL: ttl}
+	return ResolvedStatus{Look: look, ColorMode: mode, Scope: scope, TTL: ttl}
 }
 
 // StatusLook resolves the status presentation from the global config, applying

@@ -13,6 +13,8 @@ func TestNormalize(t *testing.T) {
 		"WORKING":   Working,
 		" waiting ": Waiting,
 		"waiting":   Waiting,
+		"ready":     Ready,
+		" READY ":   Ready,
 		"done":      Idle,
 		"idle":      Idle,
 		"":          Idle,
@@ -77,6 +79,33 @@ func TestWriteReadRemove(t *testing.T) {
 	}
 }
 
+func TestWriteReadBase(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	const proj, root = "workflow", "/work/workflow"
+	if err := WriteBase(proj, root, Ready); err != nil {
+		t.Fatalf("WriteBase: %v", err)
+	}
+	st, ok, err := ReadBase(proj, root)
+	if err != nil || !ok {
+		t.Fatalf("ReadBase ok=%v err=%v", ok, err)
+	}
+	if st.State != Ready {
+		t.Errorf("base state = %q, want ready", st.State)
+	}
+	// The base key uses an empty branch component, so write and read land on the
+	// exact same file (no git call needed to agree).
+	wkey := Key(proj, "", root)
+	if base := Key(proj, baseBranch, root); base != wkey {
+		t.Errorf("base key mismatch: %q vs %q", base, wkey)
+	}
+	// A worktree on the same root path keys differently from the base, so the two
+	// never collide.
+	if Key(proj, "main", root) == wkey {
+		t.Error("base key collides with a branch key on the same path")
+	}
+}
+
 func TestReadMalformed(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "bad.json")
@@ -113,10 +142,14 @@ func TestEffective(t *testing.T) {
 	}{
 		{"fresh working stays", Working, fresh, ttl, Working},
 		{"stale working downgrades", Working, stale, ttl, Idle},
+		// waiting/ready never restamp, so they persist past the TTL (the
+		// 30-minute-call bug): a missed "needs you" is worse than a stale one.
 		{"fresh waiting stays", Waiting, fresh, ttl, Waiting},
-		{"stale waiting downgrades", Waiting, stale, ttl, Idle},
+		{"stale waiting persists", Waiting, stale, ttl, Waiting},
+		{"fresh ready stays", Ready, fresh, ttl, Ready},
+		{"stale ready persists", Ready, stale, ttl, Ready},
 		{"idle stays idle", Idle, stale, ttl, Idle},
-		{"ttl disabled keeps state", Working, stale, 0, Working},
+		{"ttl disabled keeps working", Working, stale, 0, Working},
 	}
 	for _, c := range cases {
 		if got := Effective(c.st, c.ts, c.ttl, now); got != c.want {
