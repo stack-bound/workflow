@@ -74,8 +74,9 @@ ends — a "needs you" tab stays lit even while you're away for half an hour.
 ## Where it shows
 
 - **tmux tab** — the icon is prefixed to the current window's name and, by
-  default, always carries the state's colour (yellow working, red waiting). A tab WorkFlow opened keeps its icon; a borrowed tab is
-  reverted to exactly its prior state when the session ends.
+  default, the whole tab is recoloured for the state (yellow working, red
+  waiting), reverting on idle. A tab WorkFlow opened keeps its icon; a borrowed
+  tab is reverted to exactly its prior state when the session ends.
 - **[Dashboard](/guide/dashboard)** — an agent-status cell on each workspace row
   **and on the base/root checkout row**, with the working/waiting/ready glyphs
   called out in the legend. Idle rows leave the cell blank. (Unrelated tabs are
@@ -127,7 +128,7 @@ field is optional.
 # ~/.config/workFlow/config.yaml
 status:
   preset: nerdfont        # glyph set: nerdfont (default), emoji, or ascii
-  color_mode: tab         # extra tab colouring: tab (default, whole tab), glyph (icon only), or none
+  color_mode: tab         # how tmux colours the tab: tab (default, whole tab), glyph (icon only), or none
   scope: all              # which tabs to decorate: all (default) or wf
   ttl: 30m                # how long a working status stays "live" before idle (default 30m)
   glyphs:                 # override individual state glyphs
@@ -144,7 +145,7 @@ status:
 | Field | Default | What it does                                                                                                                                                   |
 | --- | --- |----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `preset` | `nerdfont` | Built-in glyph set: `nerdfont`, `emoji` (🤖 ⏳ 🔔 🌿), or `ascii` (`*` `?` `!` `-`)                                                                             |
-| `color_mode` | `tab` | Extra tab colouring: `tab` (whole tab), `glyph` (icon only), or `none`                                                                                         |
+| `color_mode` | `tab` | How tmux colours the tab: `tab` (whole tab), `glyph` (icon only), or `none`                                                                                    |
 | `scope` | `all` | Which tabs to decorate: `all` (any current window, anywhere) or `wf` (only registered worktrees and project bases — leave unrelated tabs untouched)            |
 | `ttl` | `30m` | How long a **working** status stays live before it reads as idle (any Go duration, e.g. `90s`, `10m`; `≤0` disables). `waiting`/`ready` ignore it and persist. |
 | `glyphs` | preset | Per-state glyph overrides (`working` / `waiting` / `ready` / `idle`)                                                                                           |

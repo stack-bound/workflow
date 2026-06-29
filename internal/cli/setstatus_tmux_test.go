@@ -61,11 +61,16 @@ func TestSetStatusDecoratesOwnedCurrentWindow(t *testing.T) {
 	if got := winOption(t, socket, winID, "#{window_name}"); !strings.Contains(got, workLook.Glyph) {
 		t.Errorf("owned window did not get the working glyph %q: %q", workLook.Glyph, got)
 	}
-	// The glyph carries its colour inline so the tab icon matches the dashboard
-	// glyph (default color_mode "tab" still tints the whole tab on top).
-	wantInline := "#[fg=colour" + workLook.Color + "]" + workLook.Glyph
-	if got := winOption(t, socket, winID, "#{window_name}"); !strings.Contains(got, wantInline) {
-		t.Errorf("owned window icon not inline-coloured, want %q: %q", wantInline, got)
+	// Default color_mode "tab" tints the whole tab via per-window style options,
+	// NOT by smuggling an inline "#[fg=...]" style into the window name (that
+	// reset would break a user's powerline window-status-format). So the name
+	// stays plain and the current-window style carries the colour.
+	if got := winOption(t, socket, winID, "#{window_name}"); strings.Contains(got, "#[fg=") {
+		t.Errorf("tab mode should not inline-colour the window name: %q", got)
+	}
+	wantStyle := "fg=colour" + workLook.Color
+	if got := winOption(t, socket, winID, "#{window-status-current-style}"); got != wantStyle {
+		t.Errorf("current-window style = %q, want %q", got, wantStyle)
 	}
 
 	// done keeps the idle glyph (wf owns the window; it never reverts).
