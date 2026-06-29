@@ -60,6 +60,7 @@ wf rm feature-x                # remove a workspace without merging
 | `wf copy <branch>` | Copy a workspace path to the clipboard |
 | `wf merge <branch>` | Merge into base, then remove the worktree, branch, and registration |
 | `wf rm <branch>` | Remove a workspace (worktree + branch + registration) without merging |
+| `wf forget <branch>` | Drop a workspace from the registry without deleting its files or branch (escape hatch for stuck/orphaned worktrees) |
 | `wf resurrect` | Open a tmux window for every tracked workspace (after a tmux/computer restart) |
 | `wf sidebar` | Live strip of the workspace windows open right now (tmux) |
 | `wf hooks install` | Install the Claude Code hooks that show live agent status (`uninstall`, `print`) |

@@ -85,7 +85,7 @@ default is Nerd Font):
 | <kbd>t</kbd> | Jump to the workspace's **tmux window** (tmux only) |
 | <kbd>c</kbd> | **Copy** the workspace path to the clipboard |
 | <kbd>m</kbd> | **Merge** the workspace (asks to confirm) |
-| <kbd>x</kbd> | **Remove** the workspace (asks to confirm) |
+| <kbd>x</kbd> | **Remove** the workspace (asks to confirm; <kbd>f</kbd> on the prompt forgets instead) |
 | <kbd>r</kbd> | Refresh status now |
 | <kbd>q</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd> | Quit |
 
@@ -123,6 +123,12 @@ is safe to drop:
 ```ansi
 Remove acme-api/feature-login? This discards uncommitted changes and 3 unmerged commits — work will be lost. Are you sure? [y/n]
 ```
+
+The remove prompt also offers <kbd>f</kbd> to **forget** the workspace instead:
+unregister it but leave its files and branch on disk. It's the way out when a
+removal is blocked because the worktree holds files `wf` can't delete (for
+example root-owned files left by a Docker container) — see
+[Troubleshooting](/guide/troubleshooting#removing-a-workspace-fails-with-permission-denied).
 
 ## Managing projects
 

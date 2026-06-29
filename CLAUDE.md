@@ -24,6 +24,16 @@ golangci-lint run         # lint (config: .golangci.yml)
 
 A `Makefile` wraps the common tasks: `make build`, `make test`, `make test-coverage` (runs all tests and prints per-function + total coverage), `make lint`, and `make clean`. The release build is driven by `goreleaser` (`.goreleaser.yaml`).
 
+## Docs (VitePress, under `docs/`)
+
+The documentation site lives in `docs/` (VitePress). You can build it yourself at
+any point — **run `make docs-build`** (`cd docs && npm ci && npm run build`). It
+compiles the static site to `docs/.vitepress/dist` and **fails on dead links**,
+so it doubles as the check for any cross-references you add or change. Use it
+after editing anything under `docs/` (or the command/keymap docs) to confirm the
+links resolve — don't just eyeball the anchors. `make docs` runs the dev server
+locally; `make docs-deploy` ships to Cloudflare Pages (needs wrangler auth).
+
 ## Tests — write them for any code you add
 
 **Every change ships with tests.** Do not leave new code untested — it drops

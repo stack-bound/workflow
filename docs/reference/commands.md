@@ -219,10 +219,35 @@ wf rm <branch>
 
 Remove a workspace — worktree, branch, and registration — **without** merging.
 
+Removal is **self-healing**: a worktree left half-removed by an earlier failure
+(its directory orphaned or already deleted) is reconciled to a clean state on a
+retry. If the directory can't be deleted from here — for example it holds
+root-owned files written by a Docker bind mount — `wf rm` stops with an
+actionable error pointing at `sudo rm -rf <path>` (delete the files, then retry)
+or [`wf forget`](#wf-forget) (drop the registration and keep the files).
+
 | Flag | Description |
 | --- | --- |
 | `-p, --project <name>` | Scope to a project when the branch is ambiguous |
 | `--force` | Remove even with uncommitted changes or an unmerged branch |
+
+### `wf forget`
+
+```
+wf forget <branch>
+```
+
+Drop a workspace from `wf` — its registry entry and agent-status file — **without**
+deleting the worktree directory or its branch. It's the escape hatch for a stuck
+or orphaned workspace whose files can't be removed from here (e.g. root-owned
+files left by a Docker container) or that you've already cleaned up out-of-band:
+it always clears `wf`'s view, leaving the files for you to remove separately
+(e.g. with `sudo`). It still prunes git's stale worktree metadata so re-adding the
+same path later isn't blocked.
+
+| Flag | Description |
+| --- | --- |
+| `-p, --project <name>` | Scope to a project when the branch is ambiguous |
 
 ## Dashboard
 

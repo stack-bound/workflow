@@ -96,7 +96,7 @@ wf open feature-x --project myrepo
 ```
 
 This applies to every workspace command that takes a branch (`path`, `open`,
-`close`, `copy`, `merge`, `rm`).
+`close`, `copy`, `merge`, `rm`, `forget`).
 
 ## "worktree path already exists"
 
@@ -110,6 +110,40 @@ is still tracked, clean it up properly with `wf rm <branch>`.
 branch has uncommitted changes or commits not yet merged into base, removal needs
 `--force`. That's by design — merge it with `wf merge` to keep the work, or pass
 `--force` to drop it deliberately.
+
+## Removing a workspace fails with "Permission denied"
+
+If `wf rm` stops with something like:
+
+```
+error: failed to delete '…/myrepo_worktrees/feature-x': Permission denied
+```
+
+the worktree holds files **your user account can't delete** — almost always
+files written as `root` by a Docker container that bind-mounted the worktree
+(generated `docs/`, `node_modules`, build artifacts, and so on). Neither git nor
+`wf` can remove root-owned files, so the directory has to be cleared with
+elevated privileges. `wf` now reports this with the exact remedy. You have two
+options:
+
+```sh
+# 1. Delete the files, then let wf finish the cleanup (removes branch + registration):
+sudo rm -rf /path/to/repo_worktrees/feature-x
+wf rm feature-x --force
+
+# 2. Or drop just the wf registration now and deal with the files later:
+wf forget feature-x
+```
+
+`wf rm` is **self-healing** — once the directory is gone (or was removed
+out-of-band) a retry reconciles git's metadata, deletes the branch, and clears
+the registry entry. In the dashboard, pressing <kbd>x</kbd> then <kbd>f</kbd>
+forgets a stuck workspace without touching its files. See
+[`wf forget`](/reference/commands#wf-forget).
+
+To avoid it in the first place, run the container as your host user (e.g. Docker
+Compose `user: "${UID}:${GID}"`, or `docker run --user "$(id -u):$(id -g)"`) so
+bind-mounted files stay owned by you.
 
 ## Still stuck?
 
