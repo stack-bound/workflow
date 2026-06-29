@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - ""
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - "Merging a workspace with uncommitted changes from the dashboard now shows the reason (e.g. \"commit or stash before merging\") in a themed popup instead of a bare \"failed: exit status 1\" status line"
+security:
+  - ""
+yanked:
+  - ""

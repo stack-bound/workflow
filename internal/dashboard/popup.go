@@ -79,3 +79,13 @@ func (m Model) viewConfirm() string {
 	box := popupBox(c.title(), body, help, accent)
 	return overlayBox(m.viewLedger(), box, m.width, m.height)
 }
+
+// viewError draws a failed action's message as a centered red card, reusing the
+// shared popup shell so an engine refusal (e.g. uncommitted changes blocking a
+// merge) reads as the same kind of overlay as every other prompt rather than a
+// buried status line.
+func (m Model) viewError() string {
+	body := lipgloss.NewStyle().Width(m.popupTextWidth()).Foreground(cRed).Render(m.errBody)
+	box := popupBox(m.errTitle, body, "any key to dismiss", cRed)
+	return overlayBox(m.viewLedger(), box, m.width, m.height)
+}
