@@ -37,10 +37,12 @@ now.
 
 ## Agent status in the tab
 
-When a coding agent is running in a workspace, its window's tab shows a live
-**working / waiting / idle** icon and recolours to match — so you can see which
-workspace is busy or blocked on you from the tmux status line alone. Turn it on
-with `wf hooks install`; the [Agent Status](/guide/agent-status) guide covers the
+When a coding agent is running in **any** tab — a workspace window, the project
+base, or a tab you opened by hand — its window shows a live **working / waiting /
+ready / idle** icon and recolours to match, so you can see which tab is busy,
+blocked on you, or done from the tmux status line alone. Borrowed tabs are
+reverted to exactly their prior state when the session ends. Turn it on with
+`wf hooks install`; the [Agent Status](/guide/agent-status) guide covers the
 setup, the icons, and how to customise them.
 
 ## Resurrect

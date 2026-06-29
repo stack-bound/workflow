@@ -16,7 +16,7 @@ the [Configuration guide](/guide/configuration).
 | [`worktree_dir`](/guide/configuration#worktree-dir-global) | string | sibling `<repo>_worktrees` | Default base directory for all worktrees |
 | [`default_ide`](/guide/configuration#default-ide) | string | first detected editor | Fallback editor id for `wf edit` / `wf open` when a repo pins none ([Editors](/guide/editors)) |
 | [`ides`](/guide/configuration#ides) | list | none | Custom editors merged into the picker's catalog (`id`, `name`, `cmd`, `gui`) |
-| [`status`](/guide/configuration#status) | map | nerdfont defaults | [Agent-status](/guide/agent-status) icons/colours (`preset`, `color_mode`, `ttl`, `glyphs`, `colors`) |
+| [`status`](/guide/configuration#status) | map | nerdfont defaults | [Agent-status](/guide/agent-status) icons/colours (`preset`, `color_mode`, `scope`, `ttl`, `glyphs`, `colors`) |
 
 ```yaml
 # ~/.config/workFlow/config.yaml

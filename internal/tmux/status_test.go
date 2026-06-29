@@ -64,6 +64,126 @@ func TestTabStyleOps(t *testing.T) {
 	}
 }
 
+func TestStripGlyph(t *testing.T) {
+	glyphs := []string{"🤖", "🔔", "🌿", ""} // working, ready, idle, plus an empty
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no glyph", "feature/x", "feature/x"},
+		{"working prefix", "🤖 feature/x", "feature/x"},
+		{"ready prefix", "🔔 feature/x", "feature/x"},
+		{"only a glyph", "🌿", ""},
+		{"empty glyph in set is skipped", "plain name", "plain name"},
+		{"glyph-mode styled prefix unwrapped", "#[fg=colour11]🤖#[default] feature/x", "feature/x"},
+	}
+	for _, c := range cases {
+		if got := StripGlyph(c.in, glyphs); got != c.want {
+			t.Errorf("%s: StripGlyph(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+	}
+
+	// ascii edge: strip requires the trailing space the decoration adds, so a bare
+	// "*scratch*" is left untouched, while a name shaped like a decorated one
+	// ("* scratch") is mis-stripped (documented, accepted — the true original
+	// lives in @wf_prev_name, so revert is unaffected).
+	if got := StripGlyph("*scratch*", []string{"*"}); got != "*scratch*" {
+		t.Errorf("bare *scratch* should be untouched: got %q", got)
+	}
+	if got := StripGlyph("* scratch", []string{"*"}); got != "scratch" {
+		t.Errorf("ascii mis-strip: got %q, want %q", got, "scratch")
+	}
+}
+
+// AutoRenameSnapshot/RestoreAutoRename must capture inheritance faithfully: an
+// inherited setting snapshots as "inherit" and restores by unsetting the
+// per-window override, while an explicit on/off round-trips as itself.
+func TestAutoRenameSnapshotRestore(t *testing.T) {
+	isolatedServer(t)
+	id, err := NewWindow(t.TempDir(), "feat")
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	// NewWindow pins automatic-rename off, so it is set at the window level.
+	if snap, _ := AutoRenameSnapshot(id); snap != "off" {
+		t.Errorf("snapshot after NewWindow = %q, want off", snap)
+	}
+	// Unset → the window inherits again, which must snapshot as "inherit".
+	if err := RestoreAutoRename(id, "inherit"); err != nil {
+		t.Fatalf("RestoreAutoRename inherit: %v", err)
+	}
+	if snap, _ := AutoRenameSnapshot(id); snap != "inherit" {
+		t.Errorf("snapshot after restore-inherit = %q, want inherit", snap)
+	}
+	// Explicit on round-trips.
+	if err := RestoreAutoRename(id, "on"); err != nil {
+		t.Fatalf("RestoreAutoRename on: %v", err)
+	}
+	if snap, _ := AutoRenameSnapshot(id); snap != "on" {
+		t.Errorf("snapshot after restore-on = %q, want on", snap)
+	}
+}
+
+// AdoptWindow → AdoptedSnapshot → RevertWindow is the borrowed-tab lifecycle.
+// Adoption snapshots the true original once (idempotent), and revert restores it
+// and clears the markers, so the window returns to exactly its prior state.
+func TestAdoptAndRevertWindow(t *testing.T) {
+	isolatedServer(t)
+	// A borrowed window: created without the @wf_workspace tag, named, autorename
+	// pinned off for a deterministic name.
+	id, err := run("new-window", "-d", "-P", "-F", "#{window_id}", "-n", "myeditor")
+	if err != nil {
+		t.Fatalf("new-window: %v", err)
+	}
+	if _, err := run("set-window-option", "-t", id, "automatic-rename", "off"); err != nil {
+		t.Fatalf("pin autorename: %v", err)
+	}
+
+	if owned := WindowOwned(id); owned {
+		t.Error("a window with no @wf_workspace must read as borrowed")
+	}
+
+	AdoptWindow(id)
+	prevName, autoSnap, adopted := AdoptedSnapshot(id)
+	if !adopted || prevName != "myeditor" || autoSnap != "off" {
+		t.Fatalf("AdoptedSnapshot = (%q, %q, %v), want (myeditor, off, true)", prevName, autoSnap, adopted)
+	}
+
+	// Idempotent: a second adopt after a rename keeps the true original.
+	if err := RenameWindow(id, "🤖 myeditor"); err != nil {
+		t.Fatal(err)
+	}
+	AdoptWindow(id)
+	if pn, _, _ := AdoptedSnapshot(id); pn != "myeditor" {
+		t.Errorf("re-adopt overwrote the original: %q", pn)
+	}
+
+	// It shows up in the server-wide sweep list.
+	adoptedWins, err := AdoptedWindows()
+	if err != nil {
+		t.Fatalf("AdoptedWindows: %v", err)
+	}
+	var found bool
+	for _, w := range adoptedWins {
+		if w.ID == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("adopted window %q not in AdoptedWindows: %+v", id, adoptedWins)
+	}
+
+	// Revert restores the name and clears the markers.
+	RevertWindow(id, prevName, autoSnap)
+	if name, _ := GetWindowName(id); name != "myeditor" {
+		t.Errorf("name after revert = %q, want myeditor", name)
+	}
+	if _, _, stillAdopted := AdoptedSnapshot(id); stillAdopted {
+		t.Error("markers not cleared after revert")
+	}
+}
+
 func TestRenameAndStyleIntegration(t *testing.T) {
 	isolatedServer(t)
 

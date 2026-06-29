@@ -146,6 +146,13 @@ type Model struct {
 	status    string
 	statusErr bool
 
+	// startupTasks are best-effort jobs run concurrently off the launch path when
+	// the program starts (see StartupTask). notices accumulates whatever they
+	// report so the status line shows every notice rather than letting a later one
+	// clobber an earlier one.
+	startupTasks []StartupTask
+	notices      []string
+
 	width, height int
 	ready         bool
 }
@@ -195,8 +202,25 @@ type editMsg struct {
 
 type tickMsg time.Time
 
-// New builds a dashboard model over the given engine and config.
-func New(mgr *workspace.Manager, global *config.Global) Model {
+// noticeMsg carries the one-line result of a finished startup task (see
+// StartupTask). A non-empty notice is appended to the status line; an empty one
+// (the task had nothing to report) is ignored.
+type noticeMsg struct{ text string }
+
+// StartupTask is a unit of best-effort work run when the dashboard opens. The
+// dashboard wraps each task in a tea.Cmd and fires them from Init, so they run
+// concurrently off the launch path — a slow task never delays the ledger
+// appearing — and surfaces the one-line string each returns in the status line
+// (or shows nothing when it returns ""). Tasks are constructed in the cli layer,
+// which may read settings, hit the network, etc.; passing them in keeps the
+// dashboard package free of any dependency on cli. The Claude Code hook
+// auto-update is the first such task — register more launch-time jobs alongside
+// it rather than computing anything before Run.
+type StartupTask func() string
+
+// New builds a dashboard model over the given engine and config. Any startup
+// tasks run concurrently when the program starts (see StartupTask and Init).
+func New(mgr *workspace.Manager, global *config.Global, tasks ...StartupTask) Model {
 	self, err := os.Executable()
 	if err != nil || self == "" {
 		self = "wf" // fall back to PATH lookup
@@ -206,26 +230,46 @@ func New(mgr *workspace.Manager, global *config.Global) Model {
 	ti.CharLimit = 100
 	ti.Prompt = "branch: "
 	return Model{
-		mgr:    mgr,
-		global: global,
-		self:   self,
-		inTmux: tmux.Available(),
-		input:  ti,
-		status: "loading…",
+		mgr:          mgr,
+		global:       global,
+		self:         self,
+		inTmux:       tmux.Available(),
+		input:        ti,
+		status:       "loading…",
+		startupTasks: tasks,
 	}
 }
 
-// Run starts the dashboard program.
-func Run(mgr *workspace.Manager, global *config.Global) error {
-	p := tea.NewProgram(New(mgr, global), tea.WithAltScreen())
+// Run starts the dashboard program. Any startup tasks (see StartupTask) run
+// concurrently off the launch path once the program starts; each surfaces a
+// one-line notice in the status line when it has something to report, and the
+// dashboard opens immediately no matter how slow a task is.
+func Run(mgr *workspace.Manager, global *config.Global, tasks ...StartupTask) error {
+	p := tea.NewProgram(New(mgr, global, tasks...), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
 }
 
-// Init kicks off the first refresh, the auto-refresh tick (a safety net), and
-// the fsnotify watcher that makes status updates feel instant.
+// Init kicks off the first refresh, the auto-refresh tick (a safety net), the
+// fsnotify watcher that makes status updates feel instant, and any registered
+// startup tasks — all as concurrent commands, so none of them delay the first
+// paint.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.refreshCmd(), tickCmd(), watchStatusCmd())
+	cmds := []tea.Cmd{m.refreshCmd(), tickCmd(), watchStatusCmd()}
+	return tea.Batch(append(cmds, m.startupCmds()...)...)
+}
+
+// startupCmds wraps each registered startup task in a tea.Cmd that runs it off
+// the main loop and reports its result via a noticeMsg. Running the tasks as
+// commands (rather than computing their notices before launch) is what keeps a
+// slow task from blocking the dashboard from opening.
+func (m Model) startupCmds() []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.startupTasks))
+	for _, task := range m.startupTasks {
+		task := task
+		cmds = append(cmds, func() tea.Msg { return noticeMsg{text: task()} })
+	}
+	return cmds
 }
 
 // --- commands ---
@@ -255,11 +299,19 @@ func (m Model) refreshCmd() tea.Cmd {
 }
 
 // readStatuses reads each workspace's status file and resolves it through the
-// TTL so a stale working/waiting renders as idle.
+// TTL so a stale working status renders as idle (waiting/ready persist). It also
+// reads each project's base/root checkout, keyed by the project-root path — the
+// same key set-status writes — so the base row can show an agent working at the
+// project root.
 func readStatuses(projects []workspace.ProjectView, ttl time.Duration) map[string]status.State {
 	now := time.Now()
 	out := make(map[string]status.State)
 	for _, pv := range projects {
+		if root := pv.Project.Path; root != "" {
+			if st, ok, err := status.ReadBase(pv.Project.Name, root); err == nil && ok {
+				out[root] = status.Effective(st.State, st.TS, ttl, now)
+			}
+		}
 		for _, v := range pv.Workspaces {
 			wt := v.Worktree
 			st, ok, err := status.ReadFor(wt.Project, wt.Branch, wt.Path)
@@ -575,6 +627,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editMsg:
 		return m.handleEditMsg(msg)
 
+	case noticeMsg:
+		return m.handleNotice(msg), nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -613,6 +668,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m.handleLedgerKey(msg)
 	}
+}
+
+// handleNotice surfaces a finished startup task's notice in the status line.
+// Empty notices (nothing to report) are ignored. When several tasks report, their
+// notices accumulate and are joined with " · " so a later one never clobbers an
+// earlier one; the result persists like any status message until the next action
+// overwrites it. Rebuilding the line from the accumulated slice means the order
+// in which the concurrent tasks finish doesn't change what is shown.
+func (m Model) handleNotice(msg noticeMsg) Model {
+	if msg.text == "" {
+		return m
+	}
+	m.notices = append(m.notices, msg.text)
+	m.status, m.statusErr = strings.Join(m.notices, " · "), false
+	return m
 }
 
 // handleEditMsg acts on resolved editor preferences: autolaunch the default

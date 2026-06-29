@@ -10,8 +10,11 @@ func TestStatusResolveDefaults(t *testing.T) {
 	if r.ColorMode != "tab" {
 		t.Errorf("ColorMode = %q, want tab", r.ColorMode)
 	}
-	if r.TTL != 5*time.Minute {
-		t.Errorf("TTL = %v, want 5m", r.TTL)
+	if r.Scope != scopeAll {
+		t.Errorf("Scope = %q, want all", r.Scope)
+	}
+	if r.TTL != 30*time.Minute {
+		t.Errorf("TTL = %v, want 30m", r.TTL)
 	}
 	// nerdfont preset: idle is the branch glyph, working/waiting are non-empty,
 	// and idle has no color (so tab-mode reverts and the glyph stays default).
@@ -23,6 +26,26 @@ func TestStatusResolveDefaults(t *testing.T) {
 	}
 	if r.Look[stateWorking].Color != "11" || r.Look[stateWaiting].Color != "9" {
 		t.Errorf("default colors wrong: %+v", r.Look)
+	}
+	// ready ("your turn") is a first-class state: a non-empty glyph in green.
+	if r.Look[stateReady].Glyph == "" {
+		t.Errorf("ready glyph empty; it must carry the bell icon")
+	}
+	if r.Look[stateReady].Color != "10" {
+		t.Errorf("ready color = %q, want 10 (green)", r.Look[stateReady].Color)
+	}
+}
+
+func TestStatusResolveScope(t *testing.T) {
+	if got := (&StatusConfig{Scope: "wf"}).Resolve().Scope; got != scopeWF {
+		t.Errorf("scope wf = %q, want wf", got)
+	}
+	if got := (&StatusConfig{Scope: "all"}).Resolve().Scope; got != scopeAll {
+		t.Errorf("scope all = %q, want all", got)
+	}
+	// An unknown scope falls back to the default (all).
+	if got := (&StatusConfig{Scope: "bogus"}).Resolve().Scope; got != scopeAll {
+		t.Errorf("bogus scope = %q, want all", got)
 	}
 }
 
@@ -58,8 +81,8 @@ func TestStatusResolveBadValuesFallBack(t *testing.T) {
 	if r.ColorMode != "tab" {
 		t.Errorf("bad color_mode should fall back to tab, got %q", r.ColorMode)
 	}
-	if r.TTL != 5*time.Minute {
-		t.Errorf("bad ttl should fall back to 5m, got %v", r.TTL)
+	if r.TTL != 30*time.Minute {
+		t.Errorf("bad ttl should fall back to 30m, got %v", r.TTL)
 	}
 	// Unknown preset falls back to nerdfont (non-empty idle glyph).
 	if r.Look[stateIdle].Glyph == "" {

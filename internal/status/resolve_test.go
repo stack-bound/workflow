@@ -41,3 +41,36 @@ func TestResolveByCwd(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveProjectByCwd(t *testing.T) {
+	root := t.TempDir()
+	repoA := filepath.Join(root, "repoA")
+	repoB := filepath.Join(root, "repoB")
+
+	store := &registry.Store{Projects: []registry.Project{
+		{Name: "A", Path: repoA},
+		{Name: "B", Path: repoB},
+		{Name: "noPath"}, // empty path is skipped, never matches
+	}}
+
+	cases := []struct {
+		name string
+		cwd  string
+		want string // expected project name, "" for nil
+	}{
+		{"exact root", repoA, "A"},
+		{"nested in root", filepath.Join(repoA, "internal", "cli"), "A"},
+		{"other project", repoB, "B"},
+		{"outside any", filepath.Join(root, "elsewhere"), ""},
+		{"sibling-prefix not matched", repoA + "-x", ""},
+	}
+	for _, c := range cases {
+		got := ResolveProjectByCwd(store, c.cwd)
+		switch {
+		case c.want == "" && got != nil:
+			t.Errorf("%s: got %q, want nil", c.name, got.Name)
+		case c.want != "" && (got == nil || got.Name != c.want):
+			t.Errorf("%s: got %v, want %q", c.name, got, c.want)
+		}
+	}
+}

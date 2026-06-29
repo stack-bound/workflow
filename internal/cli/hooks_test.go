@@ -32,10 +32,10 @@ func countSetStatus(t *testing.T, settings map[string]any) (count int, events ma
 func TestMergeHooksFromEmpty(t *testing.T) {
 	s := mergeHooks(map[string]any{}, "/usr/local/bin/wf")
 	count, events := countSetStatus(t, s)
-	if count != 4 {
-		t.Fatalf("got %d set-status entries, want 4", count)
+	if count != 5 {
+		t.Fatalf("got %d set-status entries, want 5", count)
 	}
-	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Notification", "Stop"} {
+	for _, ev := range []string{"UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"} {
 		if events[ev] != 1 {
 			t.Errorf("event %s has %d entries, want 1", ev, events[ev])
 		}
@@ -46,11 +46,41 @@ func TestMergeHooksFromEmpty(t *testing.T) {
 	}
 }
 
+// The "your turn" / teardown remap is the heart of this feature: Stop now drives
+// ready (not done), and a new SessionEnd hook drives done.
+func TestMergeHooksStopAndSessionEnd(t *testing.T) {
+	s := mergeHooks(map[string]any{}, "/bin/wf")
+	if got := setStatusCmdFor(t, s, "Stop"); !strings.Contains(got, "set-status ready") {
+		t.Errorf("Stop hook = %q, want it to call set-status ready", got)
+	}
+	if got := setStatusCmdFor(t, s, "SessionEnd"); !strings.Contains(got, "set-status done") {
+		t.Errorf("SessionEnd hook = %q, want it to call set-status done", got)
+	}
+}
+
+// setStatusCmdFor returns the set-status command string wf installed under event.
+func setStatusCmdFor(t *testing.T, settings map[string]any, event string) string {
+	t.Helper()
+	hooks, _ := settings["hooks"].(map[string]any)
+	groups, _ := hooks[event].([]any)
+	for _, graw := range groups {
+		g, _ := graw.(map[string]any)
+		entries, _ := g["hooks"].([]any)
+		for _, eraw := range entries {
+			e, _ := eraw.(map[string]any)
+			if c, _ := e["command"].(string); strings.Contains(c, "set-status") {
+				return c
+			}
+		}
+	}
+	return ""
+}
+
 func TestMergeHooksIdempotent(t *testing.T) {
 	s := mergeHooks(map[string]any{}, "/bin/wf")
 	s = mergeHooks(s, "/bin/wf")
-	if count, _ := countSetStatus(t, s); count != 4 {
-		t.Errorf("after double merge got %d entries, want 4 (no duplicates)", count)
+	if count, _ := countSetStatus(t, s); count != 5 {
+		t.Errorf("after double merge got %d entries, want 5 (no duplicates)", count)
 	}
 }
 
@@ -147,6 +177,118 @@ func TestHooksPrintCommand(t *testing.T) {
 	}
 }
 
+// oldInstall builds a settings map matching a pre-upgrade install: the four
+// original hooks with Stop→done and no SessionEnd.
+func oldInstall(self string) map[string]any {
+	grp := func(matcher, cmd string) map[string]any {
+		g := map[string]any{"hooks": []any{hookEntry(cmd)}}
+		if matcher != "" {
+			g["matcher"] = matcher
+		}
+		return g
+	}
+	return map[string]any{"hooks": map[string]any{
+		"UserPromptSubmit": []any{grp("", hookCommand(self, "working"))},
+		"PostToolUse":      []any{grp("", hookCommand(self, "working"))},
+		"Notification":     []any{grp("permission_prompt|elicitation_dialog", hookCommand(self, "waiting"))},
+		"Stop":             []any{grp("", hookCommand(self, "done"))},
+	}}
+}
+
+func TestHookDriftAndInstalled(t *testing.T) {
+	if hooksInstalled(map[string]any{}) {
+		t.Error("empty settings should report no hooks installed")
+	}
+	old := oldInstall("/bin/wf")
+	if !hooksInstalled(old) {
+		t.Error("old install should report hooks installed")
+	}
+	// Stop flipped done→ready and SessionEnd is new; the other three still match.
+	drift := hookDrift(old)
+	if len(drift) != 2 || drift[0] != "Stop" || drift[1] != "SessionEnd" {
+		t.Errorf("drift = %v, want [Stop SessionEnd]", drift)
+	}
+	// A current install has no drift, and a path-only difference is NOT drift
+	// (drift is judged on the reported state, not the embedded binary path).
+	if d := hookDrift(mergeHooks(map[string]any{}, "/some/other/path/wf")); len(d) != 0 {
+		t.Errorf("current install (different path) drift = %v, want none", d)
+	}
+}
+
+// On launch, an already-opted-in user's stale hooks are brought up to date and a
+// one-line notice names what changed; re-running is a no-op.
+func TestAutoUpdateHooksUpgradesOldInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path, _ := settingsPath()
+	if err := saveSettings(path, oldInstall("/old/bin/wf")); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := autoUpdateHooks()
+	if !strings.Contains(msg, "Stop") || !strings.Contains(msg, "SessionEnd") {
+		t.Errorf("notice = %q, want it to name Stop and SessionEnd", msg)
+	}
+	settings, _ := loadSettings(path)
+	if count, _ := countSetStatus(t, settings); count != 5 {
+		t.Errorf("entries after auto-update = %d, want 5", count)
+	}
+	hooks := asMap(settings["hooks"])
+	if st, _ := installedHookState(hooks, "Stop", ""); st != "ready" {
+		t.Errorf("Stop after update = %q, want ready", st)
+	}
+	if _, ok := installedHookState(hooks, "SessionEnd", ""); !ok {
+		t.Error("SessionEnd not added by auto-update")
+	}
+	if msg2 := autoUpdateHooks(); msg2 != "" {
+		t.Errorf("second auto-update = %q, want \"\" (already current)", msg2)
+	}
+}
+
+// Auto-update never installs from absence — a fresh machine or a deliberate
+// `hooks uninstall` (no wf hooks, perhaps other hooks present) is left untouched.
+func TestAutoUpdateHooksLeavesUninstalledAlone(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path, _ := settingsPath()
+	// A user with their own unrelated hook but none of wf's.
+	if err := saveSettings(path, map[string]any{"hooks": map[string]any{
+		"PostToolUse": []any{map[string]any{"matcher": "Write|Edit", "hooks": []any{map[string]any{"type": "command", "command": "gofmt -w"}}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if msg := autoUpdateHooks(); msg != "" {
+		t.Errorf("auto-update with no wf hooks = %q, want \"\"", msg)
+	}
+	settings, _ := loadSettings(path)
+	if count, _ := countSetStatus(t, settings); count != 0 {
+		t.Errorf("auto-update installed wf hooks from absence: %d entries", count)
+	}
+}
+
+// The dashboard's startup tasks include the hook auto-update as the first task:
+// running it upgrades an already-opted-in user's stale install and reports what
+// changed, exactly as the synchronous path did before — now off the launch path.
+func TestStartupTasksIncludeHookAutoUpdate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	path, _ := settingsPath()
+	if err := saveSettings(path, oldInstall("/old/bin/wf")); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks := startupTasks()
+	if len(tasks) == 0 {
+		t.Fatal("startupTasks returned none")
+	}
+	msg := tasks[0]()
+	if !strings.Contains(msg, "Stop") || !strings.Contains(msg, "SessionEnd") {
+		t.Errorf("first startup task notice = %q, want it to name the upgraded hooks", msg)
+	}
+	// And it actually wrote the upgrade through.
+	settings, _ := loadSettings(path)
+	if count, _ := countSetStatus(t, settings); count != 5 {
+		t.Errorf("entries after the startup task ran = %d, want 5", count)
+	}
+}
+
 func TestHooksInstallUninstallCommand(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -159,8 +301,8 @@ func TestHooksInstallUninstallCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load after install: %v", err)
 	}
-	if count, _ := countSetStatus(t, settings); count != 4 {
-		t.Errorf("installed entries = %d, want 4", count)
+	if count, _ := countSetStatus(t, settings); count != 5 {
+		t.Errorf("installed entries = %d, want 5", count)
 	}
 
 	if _, err := execWF(t, "hooks", "uninstall"); err != nil {

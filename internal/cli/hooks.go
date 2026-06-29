@@ -16,11 +16,13 @@ import (
 //
 //	UserPromptSubmit / PostToolUse  -> working
 //	Notification (permission_prompt|elicitation_dialog) -> waiting
-//	Stop -> done (idle)
+//	Stop -> ready ("your turn", end of every turn)
+//	SessionEnd -> done (revert/idle, session teardown)
 //
-// `wf set-status` infers the workspace from the cwd and no-ops outside a wf
-// worktree, so a single global install safely covers every current and future
-// workspace without touching anything else.
+// `wf set-status` infers the workspace from the hook's cwd and decorates the
+// agent's current tmux window, so a single global install safely covers every
+// current and future workspace — and any borrowed tab — without touching
+// anything else.
 
 // desiredHook is one hook wf manages.
 type desiredHook struct {
@@ -34,7 +36,8 @@ func desiredHooks() []desiredHook {
 		{"UserPromptSubmit", "", "working"},
 		{"PostToolUse", "", "working"},
 		{"Notification", "permission_prompt|elicitation_dialog", "waiting"},
-		{"Stop", "", "done"},
+		{"Stop", "", "ready"},
+		{"SessionEnd", "", "done"},
 	}
 }
 
@@ -291,6 +294,105 @@ func upsertEntry(entries []any, cmd string) []any {
 		}
 	}
 	return append(entries, hookEntry(cmd))
+}
+
+// autoUpdateHooks drift-corrects wf's already-installed Claude Code hooks when
+// they have fallen behind the current mapping (e.g. an install from before the
+// ready/SessionEnd states existed), returning a one-line notice naming the
+// events it brought up to date, or "" when it did nothing. It is best-effort
+// (every error is swallowed — a settings file it can't read or write must never
+// keep the dashboard from opening) and deliberately conservative:
+//
+//   - it acts ONLY when wf's hooks are already present, so it never installs from
+//     an empty file and never resurrects hooks a user removed with
+//     `wf hooks uninstall` (a deliberate uninstall is indistinguishable from a
+//     fresh machine — both are "no wf hooks", and neither should be auto-filled);
+//   - drift is judged on the STATE each hook reports, not the embedded binary
+//     path, so running wf from a different path/symlink never triggers a spurious
+//     rewrite on launch (an explicit `wf hooks install` still refreshes the path).
+func autoUpdateHooks() string {
+	path, err := settingsPath()
+	if err != nil {
+		return ""
+	}
+	settings, err := loadSettings(path)
+	if err != nil {
+		return ""
+	}
+	if !hooksInstalled(settings) {
+		return "" // not opted in (or deliberately uninstalled) — leave it alone
+	}
+	drift := hookDrift(settings)
+	if len(drift) == 0 {
+		return "" // already current
+	}
+	settings = mergeHooks(settings, selfPath())
+	if err := saveSettings(path, settings); err != nil {
+		return ""
+	}
+	return "updated agent-status hooks: " + strings.Join(drift, ", ")
+}
+
+// hooksInstalled reports whether any of wf's hooks are present, i.e. the user has
+// opted into wf managing their Claude Code hooks.
+func hooksInstalled(settings map[string]any) bool {
+	hooks := asMap(settings["hooks"])
+	for _, d := range desiredHooks() {
+		if _, ok := installedHookState(hooks, d.event, d.matcher); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// hookDrift lists the events whose installed set-status hook reports a different
+// state than the current mapping wants (or is missing entirely) — what an
+// auto-update would bring into line. The path is ignored on purpose (see
+// autoUpdateHooks). The order follows desiredHooks for a stable message.
+func hookDrift(settings map[string]any) []string {
+	hooks := asMap(settings["hooks"])
+	var drift []string
+	for _, d := range desiredHooks() {
+		got, ok := installedHookState(hooks, d.event, d.matcher)
+		if !ok || got != d.state {
+			drift = append(drift, d.event)
+		}
+	}
+	return drift
+}
+
+// installedHookState returns the state arg of wf's set-status hook under the
+// given event+matcher group (e.g. "done"), and whether such an entry exists.
+func installedHookState(hooks map[string]any, event, matcher string) (string, bool) {
+	for _, graw := range asSlice(hooks[event]) {
+		g, ok := graw.(map[string]any)
+		if !ok || groupMatcher(g) != matcher {
+			continue
+		}
+		for _, eraw := range asSlice(g["hooks"]) {
+			e, ok := eraw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if c, _ := e["command"].(string); strings.Contains(c, "set-status") {
+				return stateArgOf(c), true
+			}
+		}
+	}
+	return "", false
+}
+
+// stateArgOf extracts the state token following "set-status" in a hook command
+// (e.g. `"…/wf" set-status ready` → "ready"), or "" when none follows.
+func stateArgOf(cmd string) string {
+	i := strings.Index(cmd, "set-status")
+	if i < 0 {
+		return ""
+	}
+	if fields := strings.Fields(cmd[i+len("set-status"):]); len(fields) > 0 {
+		return fields[0]
+	}
+	return ""
 }
 
 // ourHooksJSON renders just wf's hooks as pretty JSON, for `hooks print`.
