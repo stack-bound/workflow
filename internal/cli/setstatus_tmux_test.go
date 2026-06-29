@@ -31,9 +31,15 @@ func TestSetStatusUpdatesTmuxTab(t *testing.T) {
 	if _, err := execWF(t, "set-status", "working"); err != nil {
 		t.Fatalf("set-status working: %v", err)
 	}
-	working := (&config.Global{}).StatusLook().Look["working"].Glyph
-	if got := tmuxWindows(t, socket); !strings.Contains(got, working) {
-		t.Errorf("tab did not get the working glyph %q:\n%s", working, got)
+	workLook := (&config.Global{}).StatusLook().Look["working"]
+	if got := tmuxWindows(t, socket); !strings.Contains(got, workLook.Glyph) {
+		t.Errorf("tab did not get the working glyph %q:\n%s", workLook.Glyph, got)
+	}
+	// The glyph carries its colour inline so the tab icon matches the dashboard
+	// glyph (default color_mode "tab" still tints the whole tab on top).
+	wantInline := "#[fg=colour" + workLook.Color + "]" + workLook.Glyph
+	if got := tmuxWindows(t, socket); !strings.Contains(got, wantInline) {
+		t.Errorf("tab icon not inline-coloured, want %q:\n%s", wantInline, got)
 	}
 
 	// Back to idle reverts the tab to the branch glyph.
