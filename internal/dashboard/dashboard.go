@@ -5,7 +5,9 @@
 package dashboard
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -44,6 +46,7 @@ const (
 	modePicker
 	modeMenu   // a popup action menu (currently the per-project menu)
 	modeRename // text input for renaming a project
+	modeError  // a popup surfacing a failed action's message (e.g. merge blocked)
 )
 
 // rowKind distinguishes the three line kinds in a project block: a project
@@ -146,6 +149,12 @@ type Model struct {
 	status    string
 	statusErr bool
 
+	// errTitle/errBody hold the content of the modeError popup raised when a
+	// suspend-and-run action fails, so the engine's message reads as a card over
+	// the ledger instead of a buried status line.
+	errTitle string
+	errBody  string
+
 	// startupTasks are best-effort jobs run concurrently off the launch path when
 	// the program starts (see StartupTask). notices accumulates whatever they
 	// report so the status line shows every notice rather than letting a later one
@@ -183,6 +192,14 @@ type actionMsg struct {
 	msg     string
 	err     error
 	refresh bool
+
+	// errTitle and detail describe a failed suspend-and-run action (see runSelf).
+	// When errTitle is set the handler raises the failure as a themed popup
+	// rather than a one-line status; detail carries the subprocess's captured
+	// stderr, which holds the engine's real explanation (the process exit error
+	// alone is just "exit status 1").
+	errTitle string
+	detail   string
 }
 
 // editMsg carries the result of resolving a workspace's editor preferences off
@@ -423,9 +440,60 @@ func (m Model) copyPathCmd(path, label string) tea.Cmd {
 // cleanly, then refreshes the ledger.
 func (m Model) runSelf(okMsg string, args ...string) tea.Cmd {
 	cmd := exec.Command(m.self, args...)
+	// Tee the subprocess stderr: it still streams to the terminal during the
+	// suspend (so add/merge setup output shows as before), but we also capture it
+	// so a failure can surface the engine's real message in a popup. tea.ExecProcess
+	// only wires Stderr to the terminal when it's nil, so setting it here is honoured.
+	var stderr bytes.Buffer
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
+	title := actionErrTitle(args)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return actionMsg{msg: okMsg, err: err, refresh: true}
+		return actionMsg{msg: okMsg, err: err, errTitle: title, detail: stderr.String(), refresh: true}
 	})
+}
+
+// actionErrTitle names the failure popup for a suspend-and-run action from its
+// wf subcommand (the first arg), so a blocked merge/add/rm/forget reads with a
+// fitting header instead of a bare "Error".
+func actionErrTitle(args []string) string {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "merge":
+		return "Merge failed"
+	case "add":
+		return "Add failed"
+	case "rm":
+		return "Remove failed"
+	case "forget":
+		return "Forget failed"
+	default:
+		return "Action failed"
+	}
+}
+
+// engineError pulls the engine's explanation out of a subprocess's captured
+// stderr. The CLI prints its top-level failure as a final "wf: <message>" line
+// (cli.Execute), which we want verbatim and without the prefix; any preceding
+// git/setup progress (e.g. from a failed add) is discarded. Falls back to the
+// process exit error when no such line is present.
+func engineError(detail string, err error) string {
+	found := ""
+	for _, line := range strings.Split(detail, "\n") {
+		line = strings.TrimSpace(line)
+		if msg := strings.TrimPrefix(line, "wf: "); msg != line {
+			found = msg // keep the last one: cli.Execute prints it after any progress
+		}
+	}
+	if found != "" {
+		return found
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return strings.TrimSpace(detail)
 }
 
 // openWindowCmd jumps to the workspace's tmux window (creating it if needed).
@@ -614,7 +682,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case actionMsg:
-		if msg.err != nil {
+		if msg.err != nil && msg.errTitle != "" {
+			// A suspend-and-run action (merge/add/rm/forget) failed: show the
+			// engine's real message as a popup instead of "failed: exit status 1".
+			m.errTitle = msg.errTitle
+			m.errBody = engineError(msg.detail, msg.err)
+			m.status, m.statusErr = "", false
+			m.mode = modeError
+		} else if msg.err != nil {
 			m.status, m.statusErr = "failed: "+msg.err.Error(), true
 		} else if msg.msg != "" {
 			m.status, m.statusErr = msg.msg, false
@@ -665,9 +740,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePickerKey(msg)
 	case modeMenu:
 		return m.handleMenuKey(msg)
+	case modeError:
+		return m.handleErrorKey(msg)
 	default:
 		return m.handleLedgerKey(msg)
 	}
+}
+
+// handleErrorKey dismisses the failed-action popup on any key, returning to the
+// ledger and clearing the message.
+func (m Model) handleErrorKey(_ tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.mode = modeLedger
+	m.errTitle, m.errBody = "", ""
+	return m, nil
 }
 
 // handleNotice surfaces a finished startup task's notice in the status line.

@@ -104,6 +104,8 @@ func (m Model) View() string {
 		return m.viewInputPopup()
 	case modeConfirm:
 		return m.viewConfirm()
+	case modeError:
+		return m.viewError()
 	default:
 		return m.viewLedger()
 	}
