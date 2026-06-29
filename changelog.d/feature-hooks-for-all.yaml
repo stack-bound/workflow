@@ -6,6 +6,7 @@ added:
   - "The dashboard base/root checkout row now shows agent status, so an agent working at the project root lights up the base row like any worktree"
   - "New `status.scope` config (`all` default, or `wf`) to limit tab decoration to registered worktrees and project bases"
   - "New `wf status reset` command reverts any borrowed tmux tabs wf decorated but left behind"
+  - "Opening the dashboard now keeps already-installed Claude Code hooks current automatically (e.g. picking up the new `ready`/`SessionEnd` states after an upgrade), with a one-line notice when it does; the check runs in the background so the dashboard opens instantly, and it never installs hooks you haven't opted into"
 changed:
   - "The `Stop` hook now reports `ready` (\"your turn\") instead of clearing to idle, and a new `SessionEnd` hook clears to idle on teardown — re-run `wf hooks install` to pick these up"
   - "\"Needs you\" statuses (`waiting`/`ready`) now persist until you act or the session ends, instead of vanishing after the staleness timeout; only an actively-working agent ages out, and its default timeout rose from 5m to 30m"

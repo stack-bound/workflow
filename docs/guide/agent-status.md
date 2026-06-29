@@ -29,9 +29,16 @@ wf hooks install
 
 This adds five lifecycle hooks to `~/.claude/settings.json` (creating it if
 needed). The install is **idempotent** and only ever touches its own entries, so
-re-running it is safe and your other hooks and settings are left untouched. If
-you installed the hooks before the `ready`/`SessionEnd` states existed, just
-re-run `wf hooks install` to pick them up.
+re-running it is safe and your other hooks and settings are left untouched.
+
+::: tip Upgrading is automatic
+If you installed the hooks before the `ready`/`SessionEnd` states existed, you
+don't have to do anything: **opening the dashboard brings already-installed hooks
+up to date in the background** and shows a one-line notice when it does. The
+dashboard opens instantly either way — the check never holds it up. It only ever
+updates hooks you've already opted into — it never installs from scratch or undoes
+a `wf hooks uninstall`. You can still run `wf hooks install` by hand any time.
+:::
 
 ```sh
 wf hooks print        # print the hook JSON without installing (for manual setup)

@@ -26,7 +26,24 @@ func runDashboard() error {
 	if err != nil {
 		return err
 	}
-	return dashboard.Run(m, g)
+	// Startup chores run concurrently once the dashboard opens (see
+	// dashboard.StartupTask), so none of them can hold up the ledger appearing.
+	// Each surfaces a one-line notice in the status line if it has something to
+	// report.
+	return dashboard.Run(m, g, startupTasks()...)
+}
+
+// startupTasks lists the best-effort jobs the dashboard runs on open, off the
+// launch path. Each returns a one-line notice (or "" for nothing to report).
+// Register additional independent launch-time work here.
+//
+// Today the only task keeps an already-opted-in user's Claude Code hooks current
+// (e.g. add SessionEnd / flip Stop→ready after an upgrade) — best-effort and
+// silent unless something actually changed.
+func startupTasks() []dashboard.StartupTask {
+	return []dashboard.StartupTask{
+		autoUpdateHooks,
+	}
 }
 
 // stdoutIsTTY reports whether stdout is an interactive terminal, so bare `wf`
