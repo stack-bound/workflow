@@ -331,6 +331,35 @@ func newRmCmd() *cobra.Command {
 	return cmd
 }
 
+func newForgetCmd() *cobra.Command {
+	var project string
+	cmd := &cobra.Command{
+		Use:   "forget <branch>",
+		Short: "Drop a workspace from wf (registry + status) without deleting its files",
+		Long: "Forget unregisters a workspace and removes its agent-status file but leaves the " +
+			"worktree directory and its branch on disk untouched. Use it to clear a stuck or " +
+			"orphaned workspace whose files cannot be deleted from here — for example root-owned " +
+			"files left by a Docker container — or one you have already cleaned up out-of-band. " +
+			"Remove the files separately (e.g. with elevated privileges) if you still want them gone.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			m, _, err := manager()
+			if err != nil {
+				return err
+			}
+			wt, err := m.Forget(args[0], project)
+			if err != nil {
+				return err
+			}
+			closeWindowBestEffort(wt.Path)
+			fmt.Printf("Forgot workspace %s/%s (left files at %s)\n", wt.Project, wt.Branch, wt.Path)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&project, "project", "p", "", "scope to a project when the branch is ambiguous")
+	return cmd
+}
+
 func newMergeCmd() *cobra.Command {
 	var project string
 	cmd := &cobra.Command{

@@ -270,6 +270,32 @@ func TestMergeAndRemoveConfirm(t *testing.T) {
 	}
 }
 
+func TestForgetFromRemoveConfirm(t *testing.T) {
+	// From the rm prompt, f forgets the workspace (unregister, keep files).
+	m := readyModel(t)
+	m.cursor = 2 // alpha/feat-1
+	m, _ = step(m, runeKey("x"))
+	if m.mode != modeConfirm || m.confirm.action != "rm" {
+		t.Fatalf("x → mode=%v action=%q", m.mode, m.confirm.action)
+	}
+	m, cmd := step(m, runeKey("f"))
+	if cmd == nil || m.mode != modeLedger {
+		t.Fatalf("rm confirm f → cmd=%v mode=%v", cmd, m.mode)
+	}
+	if !strings.Contains(m.status, "forgetting") {
+		t.Errorf("rm confirm f → status=%q, want forgetting", m.status)
+	}
+
+	// f is inert on the merge prompt (forget is rm-only).
+	m2 := readyModel(t)
+	m2.cursor = 2
+	m2, _ = step(m2, runeKey("m"))
+	m2, cmd2 := step(m2, runeKey("f"))
+	if cmd2 != nil || m2.mode != modeConfirm {
+		t.Errorf("merge confirm f → cmd=%v mode=%v, want inert", cmd2, m2.mode)
+	}
+}
+
 func TestConfirmCancel(t *testing.T) {
 	m := readyModel(t)
 	m.cursor = 2

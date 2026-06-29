@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -153,6 +154,35 @@ func WorktreeRemove(repo, path string, force bool) error {
 	}
 	args = append(args, path)
 	return runIO(args...)
+}
+
+// WorktreePrune removes administrative metadata for worktrees whose working
+// tree has gone missing (e.g. after a `worktree remove` that deleted the
+// directory but could not finish). It is a safe no-op when nothing is stale and
+// never affects a live worktree.
+func WorktreePrune(repo string) error {
+	_, err := run(repo, "worktree", "prune")
+	return err
+}
+
+// IsWorktree reports whether path is a live worktree registered with repo — it
+// appears in `git worktree list`. A directory whose admin metadata has been
+// pruned or whose .git pointer was removed (a half-finished removal) is not,
+// letting callers tell an orphaned directory from a healthy worktree.
+func IsWorktree(repo, path string) bool {
+	out, err := run(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return false
+	}
+	target := filepath.Clean(path)
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "worktree "); ok {
+			if filepath.Clean(rest) == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Merge checks out base in repo and merges branch into it (no fast-forward so

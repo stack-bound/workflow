@@ -124,6 +124,41 @@ func TestCLIWorkspaceLifecycle(t *testing.T) {
 	}
 }
 
+func TestCLIForget(t *testing.T) {
+	cfg := isolateConfig(t)
+	repo := gitRepo(t)
+	if _, err := execWF(t, "project", "add", repo, "--name", "proj"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execWF(t, "add", "feat", "--project", "proj"); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := registry.Load(regPathFor(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wts := store.FindWorktrees("feat", "proj")
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 worktree, got %d", len(wts))
+	}
+	wtPath := wts[0].Path
+
+	if _, err := execWF(t, "forget", "feat", "--project", "proj"); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	// Registry cleared, but the directory and branch are left in place.
+	if got := listJSON(t); len(got) != 0 {
+		t.Errorf("workspace not forgotten: %+v", got)
+	}
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Errorf("forget deleted the worktree dir: %v", err)
+	}
+	if !git.BranchExists(repo, "feat") {
+		t.Error("forget deleted the branch; it should be left intact")
+	}
+}
+
 func TestCLIMerge(t *testing.T) {
 	cfg := isolateConfig(t)
 	repo := gitRepo(t)

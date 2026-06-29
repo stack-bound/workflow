@@ -175,6 +175,43 @@ func TestWorktreeAddAndRemove(t *testing.T) {
 	}
 }
 
+func TestIsWorktree(t *testing.T) {
+	repo := newRepo(t)
+	wt := filepath.Join(t.TempDir(), "feat")
+	if err := WorktreeAdd(repo, wt, "feat", "main", true); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+	if !IsWorktree(repo, wt) {
+		t.Error("IsWorktree(live worktree) = false, want true")
+	}
+	// A trailing slash must still match the canonical path.
+	if !IsWorktree(repo, wt+"/") {
+		t.Error("IsWorktree did not normalise a trailing slash")
+	}
+	if IsWorktree(repo, filepath.Join(t.TempDir(), "unknown")) {
+		t.Error("IsWorktree(unknown path) = true, want false")
+	}
+}
+
+func TestWorktreePrune(t *testing.T) {
+	repo := newRepo(t)
+	wt := filepath.Join(t.TempDir(), "feat")
+	if err := WorktreeAdd(repo, wt, "feat", "main", true); err != nil {
+		t.Fatalf("WorktreeAdd: %v", err)
+	}
+	// Drop the working tree behind git's back, leaving stale admin metadata —
+	// the state a `worktree remove` that failed partway can produce.
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	if err := WorktreePrune(repo); err != nil {
+		t.Fatalf("WorktreePrune: %v", err)
+	}
+	if IsWorktree(repo, wt) {
+		t.Error("worktree still registered after prune")
+	}
+}
+
 func TestStatsAndDiff(t *testing.T) {
 	repo := newRepo(t)
 	wt := filepath.Join(t.TempDir(), "feat")

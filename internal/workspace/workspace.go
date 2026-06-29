@@ -336,7 +336,66 @@ func (m *Manager) Resolve(ref, projectFlag string) (*registry.Worktree, error) {
 	return m.resolveWorktree(store, ref, projectFlag)
 }
 
+// removeWorktreeDir deletes a workspace's worktree directory, healing from a
+// previously half-finished removal. It returns nil when the directory is
+// already gone. For a live worktree it uses `git worktree remove`; for an
+// orphaned directory — git's metadata or the .git pointer already dropped, as a
+// `worktree remove` that failed partway leaves behind — it falls back to
+// deleting the directory directly. Either way it prunes git's stale bookkeeping
+// afterward. When the directory still cannot be deleted (typically because it
+// holds files owned by another user — e.g. root-owned files written by a Docker
+// bind mount) it returns an actionable error naming the manual remedy.
+func removeWorktreeDir(repo, path string, force bool) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		_ = git.WorktreePrune(repo)
+		return nil
+	}
+	if git.IsWorktree(repo, path) {
+		if err := git.WorktreeRemove(repo, path, force); err == nil {
+			_ = git.WorktreePrune(repo)
+			return nil
+		}
+		// git could not finish (permission denied, or a partially-removed state
+		// it no longer recognises): fall through to a direct removal.
+	}
+	if err := os.RemoveAll(path); err != nil {
+		_ = git.WorktreePrune(repo)
+		return fmt.Errorf("couldn't delete worktree directory %s: %w\n"+
+			"It likely holds files owned by another user (e.g. root-owned files written by a Docker container). "+
+			"Delete them with elevated privileges, then retry:\n  sudo rm -rf %s", path, err, path)
+	}
+	_ = git.WorktreePrune(repo)
+	return nil
+}
+
+// cleanupRegistration finishes a removal: it deletes the workspace's branch (if
+// it still exists), drops its registry entry, and removes its agent-status file.
+// It tolerates a branch that is already gone so a retried or partially-completed
+// removal converges to a clean state. Callers must remove (and prune) the
+// worktree directory first so git no longer reports the branch as in use.
+func (m *Manager) cleanupRegistration(repoPath string, wt *registry.Worktree, force bool) error {
+	if git.BranchExists(repoPath, wt.Branch) {
+		if err := git.DeleteBranch(repoPath, wt.Branch, force); err != nil {
+			return fmt.Errorf("worktree removed but branch deletion failed: %w", err)
+		}
+	}
+	if err := registry.WithLock(m.registryPath, func(s *registry.Store) error {
+		s.RemoveWorktree(wt.Path)
+		return nil
+	}); err != nil {
+		return err
+	}
+	// The worktree is gone; drop its agent-status file too (best-effort).
+	_ = status.Remove(wt.Project, wt.Branch, wt.Path)
+	return nil
+}
+
 // Remove removes a workspace: its worktree, its branch, and its registration.
+// It is self-healing: a worktree left half-removed by an earlier failure (its
+// directory orphaned or already gone) is reconciled to a clean state on a
+// retry. When the directory genuinely cannot be deleted from here — files owned
+// by another user — it returns an actionable error and points at `wf forget`
+// for dropping the registration without touching the files.
 func (m *Manager) Remove(ref, projectFlag string, force bool) (*registry.Worktree, error) {
 	store, err := registry.Load(m.registryPath)
 	if err != nil {
@@ -351,13 +410,32 @@ func (m *Manager) Remove(ref, projectFlag string, force bool) (*registry.Worktre
 		return nil, fmt.Errorf("project %q for workspace not found", wt.Project)
 	}
 
-	if err := git.WorktreeRemove(proj.Path, wt.Path, force); err != nil {
+	if err := removeWorktreeDir(proj.Path, wt.Path, force); err != nil {
+		return nil, fmt.Errorf("%w\nOr drop just the registration and keep the files: wf forget %s", err, wt.Branch)
+	}
+	if err := m.cleanupRegistration(proj.Path, wt, force); err != nil {
 		return nil, err
 	}
-	if git.BranchExists(proj.Path, wt.Branch) {
-		if err := git.DeleteBranch(proj.Path, wt.Branch, force); err != nil {
-			return nil, fmt.Errorf("worktree removed but branch deletion failed: %w", err)
-		}
+	return wt, nil
+}
+
+// Forget drops a workspace from wf — its registry entry and agent-status file —
+// WITHOUT deleting the worktree directory on disk or its branch. It is the
+// escape hatch for a worktree whose files cannot be removed from here
+// (root-owned files from a Docker bind mount, say) or were already deleted
+// out-of-band: it always converges wf's view to clean. It still prunes git's
+// stale worktree metadata so re-adding the same path later is not blocked.
+func (m *Manager) Forget(ref, projectFlag string) (*registry.Worktree, error) {
+	store, err := registry.Load(m.registryPath)
+	if err != nil {
+		return nil, err
+	}
+	wt, err := m.resolveWorktree(store, ref, projectFlag)
+	if err != nil {
+		return nil, err
+	}
+	if proj := store.FindProject(wt.Project); proj != nil {
+		_ = git.WorktreePrune(proj.Path)
 	}
 	if err := registry.WithLock(m.registryPath, func(s *registry.Store) error {
 		s.RemoveWorktree(wt.Path)
@@ -365,7 +443,7 @@ func (m *Manager) Remove(ref, projectFlag string, force bool) (*registry.Worktre
 	}); err != nil {
 		return nil, err
 	}
-	// The worktree is gone; drop its agent-status file too (best-effort).
+	// Best-effort: drop the agent-status file too.
 	_ = status.Remove(wt.Project, wt.Branch, wt.Path)
 	return wt, nil
 }
@@ -396,20 +474,12 @@ func (m *Manager) Merge(ref, projectFlag string) (*registry.Worktree, error) {
 	if err := git.Merge(proj.Path, wt.Base, wt.Branch); err != nil {
 		return nil, err
 	}
-	if err := git.WorktreeRemove(proj.Path, wt.Path, false); err != nil {
-		return nil, fmt.Errorf("merged, but removing the worktree failed: %w", err)
+	if err := removeWorktreeDir(proj.Path, wt.Path, false); err != nil {
+		return nil, fmt.Errorf("merged into %s, but cleaning up the worktree failed:\n%w", wt.Base, err)
 	}
-	if err := git.DeleteBranch(proj.Path, wt.Branch, false); err != nil {
-		return nil, fmt.Errorf("merged and worktree removed, but deleting the branch failed: %w", err)
-	}
-	if err := registry.WithLock(m.registryPath, func(s *registry.Store) error {
-		s.RemoveWorktree(wt.Path)
-		return nil
-	}); err != nil {
+	if err := m.cleanupRegistration(proj.Path, wt, false); err != nil {
 		return nil, err
 	}
-	// The worktree is gone; drop its agent-status file too (best-effort).
-	_ = status.Remove(wt.Project, wt.Branch, wt.Path)
 	return wt, nil
 }
 

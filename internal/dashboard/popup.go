@@ -69,6 +69,13 @@ func (m Model) viewConfirm() string {
 	c := m.confirm
 	accent := c.accent()
 	body := lipgloss.NewStyle().Width(m.popupTextWidth()).Foreground(accent).Render(c.message())
-	box := popupBox(c.title(), body, "y confirm · n/esc cancel", accent)
+	help := "y confirm · n/esc cancel"
+	if c.action == "rm" {
+		// Offer forget as the escape hatch when a worktree's files can't be
+		// deleted from here (e.g. root-owned Docker files): drop the
+		// registration and leave the directory in place.
+		help = "y remove · f forget (keep files) · n/esc cancel"
+	}
+	box := popupBox(c.title(), body, help, accent)
 	return overlayBox(m.viewLedger(), box, m.width, m.height)
 }

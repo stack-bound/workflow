@@ -66,8 +66,8 @@ func TestFooterInputAndConfirm(t *testing.T) {
 	m2, _ = step(m2, runeKey("x")) // confirm rm
 	out := m2.View()
 	// The confirmation is a centered popup card: its title, the branch, and the
-	// y/n help all render in the box over the ledger.
-	for _, want := range []string{"Remove workspace", "feat-1", "y confirm"} {
+	// help (including the forget escape hatch) all render over the ledger.
+	for _, want := range []string{"Remove workspace", "feat-1", "y remove", "f forget"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("confirm popup missing %q:\n%s", want, out)
 		}

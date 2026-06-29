@@ -816,6 +816,16 @@ func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// the prompt's warning is honoured rather than the engine refusing.
 			return m, m.deleteProjectCmd(c.project, c.wsCount > 0)
 		}
+	case "f", "F":
+		// Forget is offered only from the rm prompt: unregister the workspace and
+		// leave its files on disk — the way out when removal is blocked because
+		// the worktree holds files we can't delete (e.g. root-owned Docker files).
+		if m.confirm.action == "rm" {
+			c := m.confirm
+			m.mode = modeLedger
+			m.status, m.statusErr = "forgetting "+c.branch+"…", false
+			return m, m.runSelf("forgot "+c.branch, "forget", c.branch, "--project", c.project)
+		}
 	case "n", "N", "esc", "q":
 		m.mode = modeLedger
 		m.status, m.statusErr = "cancelled", false

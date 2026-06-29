@@ -67,7 +67,7 @@ var (
 // Column widths for a worktree row. columnHeader reuses them so the headings
 // line up with the values underneath.
 const (
-	colBranch = 26
+	colBranch = 36
 	colState  = 9
 	colAB     = 11
 	colDiff   = 12
