@@ -9,20 +9,17 @@ func TestWindowName(t *testing.T) {
 	if got := WindowName("", "feature/x", "tab", "11"); got != "feature/x" {
 		t.Errorf("empty glyph = %q, want branch only", got)
 	}
-	// Both coloured modes wrap the glyph in an inline style so the tab icon
-	// carries the same colour as the dashboard glyph, even when a custom
-	// status-bar format would swallow "tab" mode's whole-tab tint.
-	const wantColoured = "#[fg=colour11]R#[default] feature/x"
-	if got := WindowName("R", "feature/x", "tab", "11"); got != wantColoured {
-		t.Errorf("tab mode = %q, want %q", got, wantColoured)
+	// "tab" mode leaves the glyph plain — the whole tab is tinted via TabStyleOps
+	// instead, so no #[default] reset is smuggled into the name to break a
+	// powerline window-status-format.
+	if got := WindowName("R", "feature/x", "tab", "11"); got != "R feature/x" {
+		t.Errorf("tab mode = %q, want \"R feature/x\"", got)
 	}
-	if got := WindowName("R", "feature/x", "glyph", "11"); got != wantColoured {
-		t.Errorf("glyph mode = %q, want %q", got, wantColoured)
+	// glyph-mode wraps only the glyph in an inline style.
+	if got := WindowName("R", "feature/x", "glyph", "11"); got != "#[fg=colour11]R#[default] feature/x" {
+		t.Errorf("glyph mode = %q", got)
 	}
-	// No colour (idle) falls back to a plain prefix in every mode.
-	if got := WindowName("R", "feature/x", "tab", ""); got != "R feature/x" {
-		t.Errorf("tab mode no color = %q, want plain prefix", got)
-	}
+	// glyph mode with no color falls back to a plain prefix.
 	if got := WindowName("R", "feature/x", "glyph", ""); got != "R feature/x" {
 		t.Errorf("glyph mode no color = %q, want plain prefix", got)
 	}
