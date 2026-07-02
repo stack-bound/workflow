@@ -72,6 +72,12 @@ func TestSetStatusDecoratesOwnedCurrentWindow(t *testing.T) {
 	if got := winOption(t, socket, winID, "#{window-status-current-style}"); got != wantStyle {
 		t.Errorf("current-window style = %q, want %q", got, wantStyle)
 	}
+	// The same colour is also published as the @wf_color per-window option so a
+	// format-embedding theme (powerline) — whose window-status-format overrides
+	// the style above — can read #{@wf_color} and tint the segment itself.
+	if got := winOption(t, socket, winID, "#{@wf_color}"); got != workLook.Color {
+		t.Errorf("@wf_color = %q, want the working colour %q", got, workLook.Color)
+	}
 
 	// done keeps the idle glyph (wf owns the window; it never reverts).
 	if _, err := execWF(t, "set-status", "done"); err != nil {
@@ -80,6 +86,10 @@ func TestSetStatusDecoratesOwnedCurrentWindow(t *testing.T) {
 	idle := (&config.Global{}).StatusLook().Look["idle"].Glyph
 	if got := winOption(t, socket, winID, "#{window_name}"); !strings.Contains(got, idle+" feat") {
 		t.Errorf("owned window did not keep the idle glyph %q: %q", idle, got)
+	}
+	// Idle clears @wf_color so the theme reverts to its own colours.
+	if got := winOption(t, socket, winID, "#{@wf_color}"); got != "" {
+		t.Errorf("@wf_color not cleared on done: %q", got)
 	}
 }
 

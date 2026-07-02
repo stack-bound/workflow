@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - ""
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - "Agent-status colours now work with powerline and other themes whose `window-status-format` sets its own colours (which previously overrode WorkFlow's tab tint): WorkFlow publishes the status colour as a per-window `@wf_color` tmux option such a theme can read to colour the status icon (or the whole tab), leaving its background and separators intact"
+security:
+  - ""
+yanked:
+  - ""
