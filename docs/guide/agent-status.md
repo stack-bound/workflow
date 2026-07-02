@@ -156,3 +156,34 @@ The default preset uses [Nerd Font](https://www.nerdfonts.com/) glyphs. If your
 terminal font isn't patched, switch to `preset: emoji` or `preset: ascii` so the
 icons render.
 :::
+
+::: tip Powerline / custom `window-status-format` themes
+`color_mode: tab` tints the tab through tmux's `window-status-style`. A theme
+whose `window-status-format` embeds its **own** per-segment colours — a powerline
+theme such as [oh-my-tmux](https://github.com/gpakosz/.tmux), for example —
+overrides that style, so the tint wouldn't show. For these, WorkFlow also
+publishes the colour as a per-window option, **`@wf_color`** (the bare ANSI-256
+number, e.g. `11`; unset when idle). Have your format read it.
+
+To colour **just the status icon** (the first character of the window name) and
+leave the index and branch in the theme colour, wrap it with
+`push-default`/`pop-default` so `#[default]` restores the segment's full style —
+foreground **and** background — keeping the powerline background and separators
+intact:
+
+```tmux
+# in your window-status-format
+#I #{?@wf_color,#[push-default]#[fg=colour#{@wf_color}]#{=1:window_name}#[default]#{s/^.//:window_name}#[pop-default],#W}…
+```
+
+Or, to tint the **whole** segment foreground instead, the simpler form is
+`#{?@wf_color,#[fg=colour#{@wf_color}],}#I #W…`.
+
+With oh-my-tmux, set this on `tmux_conf_theme_window_status_format` (non-current
+tabs) and, if you want it there too, `tmux_conf_theme_window_status_current_format`
+(the active tab) in `~/.tmux.conf.local`, then reload (`<prefix> r`). If the
+active tab's background washes the status colours out (a light powerline accent
+colour, say), leave the **current** format as the stock `#I #W…` so only
+non-active tabs carry the coloured icon. Idle windows (`@wf_color` unset) render
+the name plain via `#W`, keeping the theme's own colours.
+:::

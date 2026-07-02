@@ -24,6 +24,21 @@ import (
 // indicator) without persisting ephemeral window ids.
 const workspaceOption = "@wf_workspace"
 
+// wfColorOption is the per-window user option wf publishes the current status
+// colour into (the bare ANSI-256 number, e.g. "11"; unset when idle). It exists
+// for themes whose window-status-format embeds its OWN per-segment colours —
+// most notably powerline themes — which override the window-status-style that
+// TabStyleOps sets and so swallow the whole-tab tint. Such a theme can read
+// #{@wf_color} in its format to colour the segment itself, e.g.
+//
+//	#{?@wf_color,#[fg=colour#{@wf_color}],}
+//
+// which overrides only the foreground (the segment background and the powerline
+// separators are left intact) and falls back to the theme's own colour when the
+// option is unset. Plain themes ignore the option and rely on the
+// window-status-style ops instead.
+const wfColorOption = "@wf_color"
+
 // Inside reports whether the current process is running inside a tmux session.
 func Inside() bool {
 	return os.Getenv("TMUX") != ""
@@ -210,21 +225,32 @@ type StyleOp struct {
 
 // TabStyleOps returns the per-window option operations that color the WHOLE tab
 // for color_mode "tab": both the current and non-current window-status styles
-// get a foreground color. When color is empty (idle) the ops UNSET the
-// per-window override so the tab inherits the user's own theme again rather than
-// a hardcoded default. Returns nil for any other mode (no tab styling). Pure.
+// get a foreground color, and the colour is also published into the
+// wfColorOption (@wf_color) per-window option so a theme that embeds its own
+// format colours — e.g. powerline — can read it and tint the segment itself (it
+// would otherwise override the window-status-style and swallow the tint; see
+// wfColorOption). When color is empty (idle) every op UNSETs its per-window
+// override so the tab inherits the user's own theme again rather than a
+// hardcoded default. Returns nil for any other mode (no tab styling). Pure.
 func TabStyleOps(mode, color string) []StyleOp {
 	if mode != "tab" {
 		return nil
 	}
+	// The two window-status styles tint the tab for plain themes; wfColorOption
+	// re-exposes the same colour for format-embedding (powerline) themes.
 	opts := []string{"window-status-style", "window-status-current-style"}
-	ops := make([]StyleOp, 0, len(opts))
+	ops := make([]StyleOp, 0, len(opts)+1)
 	for _, o := range opts {
 		if color == "" {
 			ops = append(ops, StyleOp{Option: o, Unset: true})
 		} else {
 			ops = append(ops, StyleOp{Option: o, Value: "fg=colour" + color})
 		}
+	}
+	if color == "" {
+		ops = append(ops, StyleOp{Option: wfColorOption, Unset: true})
+	} else {
+		ops = append(ops, StyleOp{Option: wfColorOption, Value: color})
 	}
 	return ops
 }
@@ -390,10 +416,12 @@ func AdoptedSnapshot(id string) (prevName, autoSnap string, adopted bool) {
 // whole-tab style override cleared. Best-effort; harmless on a window that was
 // never decorated.
 func RevertWindow(id, prevName, autoSnap string) {
-	// Drop any whole-tab colour wf layered on (unset → inherit the theme again).
+	// Drop any whole-tab colour wf layered on (unset → inherit the theme again),
+	// including the @wf_color the format-embedding theme path reads.
 	_ = ApplyWindowStyle(id, []StyleOp{
 		{Option: "window-status-style", Unset: true},
 		{Option: "window-status-current-style", Unset: true},
+		{Option: wfColorOption, Unset: true},
 	})
 	_ = RenameWindow(id, prevName)
 	_ = RestoreAutoRename(id, autoSnap)

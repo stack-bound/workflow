@@ -37,27 +37,54 @@ func TestTabStyleOps(t *testing.T) {
 		t.Errorf("none mode should yield nil ops, got %+v", got)
 	}
 
+	// tab+color: the two window-status styles carry "fg=colourN" for plain themes,
+	// and @wf_color re-exposes the bare number for format-embedding (powerline)
+	// themes to read.
 	set := TabStyleOps("tab", "11")
-	if len(set) != 2 {
-		t.Fatalf("tab+color ops = %d, want 2", len(set))
+	if len(set) != 3 {
+		t.Fatalf("tab+color ops = %d, want 3", len(set))
 	}
+	var sawColorOption bool
 	for _, op := range set {
-		if op.Unset || op.Value != "fg=colour11" {
-			t.Errorf("set op wrong: %+v", op)
+		if op.Unset {
+			t.Errorf("set op should not unset: %+v", op)
 		}
-		if !strings.HasPrefix(op.Option, "window-status") {
-			t.Errorf("unexpected option %q", op.Option)
+		switch op.Option {
+		case "@wf_color":
+			sawColorOption = true
+			if op.Value != "11" {
+				t.Errorf("@wf_color = %q, want the bare number \"11\"", op.Value)
+			}
+		default:
+			if !strings.HasPrefix(op.Option, "window-status") {
+				t.Errorf("unexpected option %q", op.Option)
+			}
+			if op.Value != "fg=colour11" {
+				t.Errorf("style op = %q, want fg=colour11", op.Value)
+			}
 		}
+	}
+	if !sawColorOption {
+		t.Error("tab+color ops did not publish @wf_color")
 	}
 
+	// idle (empty color) unsets every override — including @wf_color — so the tab
+	// inherits the user's own theme again.
 	revert := TabStyleOps("tab", "")
-	if len(revert) != 2 {
-		t.Fatalf("tab revert ops = %d, want 2", len(revert))
+	if len(revert) != 3 {
+		t.Fatalf("tab revert ops = %d, want 3", len(revert))
 	}
+	var revertColorOption bool
 	for _, op := range revert {
 		if !op.Unset {
 			t.Errorf("idle (empty color) should unset, got %+v", op)
 		}
+		if op.Option == "@wf_color" {
+			revertColorOption = true
+		}
+	}
+	if !revertColorOption {
+		t.Error("idle ops did not unset @wf_color")
 	}
 }
 
