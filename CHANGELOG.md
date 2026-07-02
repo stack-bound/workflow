@@ -2,6 +2,10 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.6.1] - 2026-07-02 (81.7%)
+### Fixed
+- Agent-status colours now work with powerline and other themes whose `window-status-format` sets its own colours (which previously overrode WorkFlow's tab tint): WorkFlow publishes the status colour as a per-window `@wf_color` tmux option such a theme can read to colour the status icon (or the whole tab), leaving its background and separators intact
+
 ## [0.6.0] - 2026-07-02 (81.7%)
 ### Added
 - New `wf forget` command drops a workspace from wf (registry + status) without deleting its worktree directory or branch — an escape hatch for a stuck or orphaned workspace whose files can't be removed from here
