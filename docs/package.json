@@ -8,7 +8,7 @@
     "dev": "vitepress dev",
     "build": "vitepress build",
     "preview": "vitepress preview",
-    "deploy": "npm run build && wrangler pages deploy .vitepress/dist"
+    "deploy": "npm run build && wrangler deploy"
   },
   "devDependencies": {
     "vitepress": "^1.6.4",

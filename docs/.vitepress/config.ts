@@ -38,7 +38,6 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/introduction', activeMatch: '/guide/' },
       { text: 'Reference', link: '/reference/commands', activeMatch: '/reference/' },
-      { text: 'Changelog', link: `${repo}/blob/master/CHANGELOG.md` },
       {
         text: `v${version}`,
         items: [
@@ -67,7 +66,6 @@ export default defineConfig({
 
     footer: {
       message: 'WorkFlow — orchestrate git worktrees from one cockpit.',
-      copyright: 'Made by stack-bound · Built with VitePress',
     },
   },
 })

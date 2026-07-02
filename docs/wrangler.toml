@@ -1,10 +1,18 @@
-# Cloudflare Pages project for the WorkFlow docs site.
+# Cloudflare Workers project for the WorkFlow docs site (static assets).
 #
 # With this file present you can deploy the built site from this folder with a
-# bare `wrangler pages deploy` (it reads the output dir below), or use the npm
+# bare `wrangler deploy` (it uploads the assets directory below), or use the npm
 # script `npm run deploy` / `make docs-deploy`, which build first then upload.
 #
 # `wrangler` is expected to be installed and authenticated (`wrangler login`);
 # it is intentionally NOT a project dependency so `npm install` stays light.
 name = "workflow-docs"
-pages_build_output_dir = ".vitepress/dist"
+account_id = "e1cda9870eb4ddeda4d53381bb982af4" # Stackbound.hq@gmail.com's account
+compatibility_date = "2026-07-02"
+
+[assets]
+directory = ".vitepress/dist"
+# Serve /guide/foo as /guide/foo.html (VitePress default clean-URL-less output
+# still emits .html files; this also gives nice 404 handling for the SPA-less site).
+html_handling = "auto-trailing-slash"
+not_found_handling = "404-page"
