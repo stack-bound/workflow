@@ -2,6 +2,26 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [0.6.0] - 2026-07-02 (81.7%)
+### Added
+- New `wf forget` command drops a workspace from wf (registry + status) without deleting its worktree directory or branch — an escape hatch for a stuck or orphaned workspace whose files can't be removed from here
+- Dashboard remove prompt now offers `f` to forget a workspace (unregister, keep files) when a removal is blocked
+- Agent status now decorates *every* tmux tab, not just wf-opened worktree windows — the current window the hook fired in is decorated, and tabs wf doesn't own are adopted then fully reverted (original name and automatic-rename restored) when the agent's session ends, so wf stays a polite guest
+- New `ready` ("your turn") status — a green bell shown between turns — distinct from idle ("no session here"), so a finished-but-parked agent is no longer indistinguishable from one that was never there
+- The dashboard base/root checkout row now shows agent status, so an agent working at the project root lights up the base row like any worktree
+- New `status.scope` config (`all` default, or `wf`) to limit tab decoration to registered worktrees and project bases
+- New `wf status reset` command reverts any borrowed tmux tabs wf decorated but left behind
+- Opening the dashboard now keeps already-installed Claude Code hooks current automatically (e.g. picking up the new `ready`/`SessionEnd` states after an upgrade), with a one-line notice when it does; the check runs in the background so the dashboard opens instantly, and it never installs hooks you haven't opted into
+### Changed
+- The `Stop` hook now reports `ready` ("your turn") instead of clearing to idle, and a new `SessionEnd` hook clears to idle on teardown — re-run `wf hooks install` to pick these up
+- "Needs you" statuses (`waiting`/`ready`) now persist until you act or the session ends, instead of vanishing after the staleness timeout; only an actively-working agent ages out, and its default timeout rose from 5m to 30m
+### Fixed
+- Removing or merging a workspace is now self-healing: a worktree left half-removed by an earlier failure (its directory orphaned or already deleted) is reconciled to a clean state on retry instead of staying stuck in the dashboard
+- When a worktree directory can't be deleted (e.g. root-owned files left by a Docker bind mount), removal now reports an actionable error with the `sudo rm -rf` and `wf forget` remedies instead of failing opaquely and stranding the registration
+- Dashboard ledger no longer lets the STATE word touch the branch name when the branch fills the branch column
+- A waiting agent no longer disappears from the tmux tab and dashboard while you're away (e.g. on a long call) — the staleness timeout no longer hides a genuinely-waiting agent
+- Merging a workspace with uncommitted changes from the dashboard now shows the reason (e.g. "commit or stash before merging") in a themed popup instead of a bare "failed: exit status 1" status line
+
 ## [0.5.0] - 2026-06-23 (80.5)
 ### Added
 - Dashboard now shows a launchable base-checkout row for every project: it displays the branch the project root is on and its clean/dirty state, and `t` opens a tmux window on the base branch at the project root, `e`/`o` open it in an editor, and `enter` shows the root's uncommitted diff — so the trunk can be launched without first creating a worktree
