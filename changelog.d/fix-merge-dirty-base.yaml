@@ -1,0 +1,16 @@
+deployment:
+  - ""
+added:
+  - ""
+changed:
+  - ""
+deprecated:
+  - ""
+removed:
+  - ""
+fixed:
+  - "Merging a workspace (`m` in the dashboard, or `wf merge`) is now refused up front with a clear message when the base branch's checkout has uncommitted changes, instead of failing mid-merge with a raw git error"
+security:
+  - ""
+yanked:
+  - ""
