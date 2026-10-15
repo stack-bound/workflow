@@ -471,6 +471,15 @@ func (m *Manager) Merge(ref, projectFlag string) (*registry.Worktree, error) {
 		return nil, fmt.Errorf("workspace %s/%s has uncommitted changes; commit or stash before merging", wt.Project, wt.Branch)
 	}
 
+	// Likewise refuse if the checkout the merge lands in (the one with base
+	// checked out) has uncommitted changes, rather than letting git fail
+	// mid-merge with a message that doesn't say where the problem is.
+	target := git.MergeTarget(proj.Path, wt.Base)
+	if b, err := git.MergeBlockers(target, wt.Base, wt.Branch); err == nil && len(b) > 0 {
+		return nil, fmt.Errorf("%s checkout at %s has uncommitted changes; commit or stash them there before merging %s",
+			wt.Base, target, wt.Branch)
+	}
+
 	if err := git.Merge(proj.Path, wt.Base, wt.Branch); err != nil {
 		return nil, err
 	}

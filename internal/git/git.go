@@ -185,6 +185,62 @@ func IsWorktree(repo, path string) bool {
 	return false
 }
 
+// MergeTarget returns the working tree a merge into base lands in: the
+// worktree that has base checked out (usually the project's main checkout),
+// else repo itself, where Merge checks base out.
+func MergeTarget(repo, base string) string {
+	out, err := run(repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return repo
+	}
+	path := ""
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(line, "worktree "); ok {
+			path = rest
+		} else if line == "branch refs/heads/"+base && path != "" {
+			return path
+		}
+	}
+	return repo
+}
+
+// MergeBlockers lists the uncommitted changes in dir that should stop branch
+// being merged into it: every tracked change, staged or not (git refuses when
+// the merge touches them, and a merge on top of them can't be cleanly
+// aborted), plus untracked files at a path branch adds, which git refuses to
+// overwrite. Other untracked files never make a merge fail, so they don't
+// block it.
+func MergeBlockers(dir, base, branch string) ([]string, error) {
+	out, err := run(dir, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return nil, err
+	}
+	var blockers []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			blockers = append(blockers, line)
+		}
+	}
+	untracked, err := run(dir, "ls-files", "--others", "--exclude-standard")
+	if err != nil || untracked == "" {
+		return blockers, err
+	}
+	added, err := run(dir, "diff", "--name-only", "--no-renames", "--diff-filter=A", base+"..."+branch)
+	if err != nil {
+		return nil, err
+	}
+	incoming := map[string]bool{}
+	for _, f := range strings.Split(added, "\n") {
+		incoming[f] = true
+	}
+	for _, f := range strings.Split(untracked, "\n") {
+		if f != "" && incoming[f] {
+			blockers = append(blockers, "?? "+f)
+		}
+	}
+	return blockers, nil
+}
+
 // Merge checks out base in repo and merges branch into it (no fast-forward so
 // the workspace's history is preserved as a unit). A default merge message is
 // supplied so the merge is non-interactive — important for the dashboard,

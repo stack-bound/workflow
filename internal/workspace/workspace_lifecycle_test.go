@@ -221,6 +221,52 @@ func TestMergeRefusesDirty(t *testing.T) {
 	}
 }
 
+func TestMergeRefusesDirtyBase(t *testing.T) {
+	repo := newRepo(t)
+	m, proj := register(t, repo)
+	wt, err := m.Add(AddOptions{Branch: "feat", Project: proj, NoSetup: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "feature.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, wt.Path, "add", ".")
+	gitCmd(t, wt.Path, "commit", "-m", "feature")
+	// An uncommitted edit in the base checkout makes the merge target dirty.
+	if err := os.WriteFile(filepath.Join(repo, "file.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = m.Merge("feat", proj)
+	if err == nil || !strings.Contains(err.Error(), "uncommitted") || !strings.Contains(err.Error(), repo) {
+		t.Fatalf("Merge into dirty base = %v, want uncommitted-changes error naming %s", err, repo)
+	}
+	// Nothing was attempted: base untouched, workspace and branch intact.
+	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); !os.IsNotExist(err) {
+		t.Error("merge landed on base despite the dirty checkout")
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Errorf("worktree removed after a refused merge: %v", err)
+	}
+	if !git.BranchExists(repo, "feat") {
+		t.Error("branch deleted after a refused merge")
+	}
+
+	// Once the base checkout is clean again the merge goes through, even with
+	// an unrelated untracked file lying around.
+	gitCmd(t, repo, "checkout", "--", "file.txt")
+	if err := os.WriteFile(filepath.Join(repo, "notes.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Merge("feat", proj); err != nil {
+		t.Fatalf("Merge into clean base: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "feature.txt")); err != nil {
+		t.Errorf("merge did not land on base: %v", err)
+	}
+}
+
 func TestResolveBasePrecedence(t *testing.T) {
 	repo := newRepo(t)
 	m := New("", &config.Global{DefaultBase: "globbase"})

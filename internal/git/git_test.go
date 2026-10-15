@@ -285,6 +285,79 @@ func TestMergeAndDeleteBranch(t *testing.T) {
 	}
 }
 
+func TestMergeTarget(t *testing.T) {
+	repo := newRepo(t)
+	if got := MergeTarget(repo, "main"); got != repo {
+		t.Errorf("MergeTarget(main) = %q, want repo %q", got, repo)
+	}
+	// A base checked out in another worktree is merged there.
+	wt := filepath.Join(t.TempDir(), "dev")
+	if err := WorktreeAdd(repo, wt, "dev", "main", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := MergeTarget(repo, "dev"); filepath.Clean(got) != filepath.Clean(wt) {
+		t.Errorf("MergeTarget(dev) = %q, want worktree %q", got, wt)
+	}
+	// A base not checked out anywhere (or not a branch) falls back to repo.
+	gitCmd(t, repo, "branch", "spare")
+	if got := MergeTarget(repo, "spare"); got != repo {
+		t.Errorf("MergeTarget(spare) = %q, want repo %q", got, repo)
+	}
+	if got := MergeTarget(t.TempDir(), "main"); got == "" {
+		t.Error("MergeTarget on a non-repo should fall back to the given path")
+	}
+}
+
+func TestMergeBlockers(t *testing.T) {
+	repo := newRepo(t)
+	wt := filepath.Join(t.TempDir(), "feat")
+	if err := WorktreeAdd(repo, wt, "feat", "main", true); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(wt, "feature.txt"), "feature\n")
+	gitCmd(t, wt, "add", ".")
+	gitCmd(t, wt, "commit", "-m", "add feature")
+
+	blockers := func() []string {
+		t.Helper()
+		b, err := MergeBlockers(repo, "main", "feat")
+		if err != nil {
+			t.Fatalf("MergeBlockers: %v", err)
+		}
+		return b
+	}
+
+	if b := blockers(); len(b) != 0 {
+		t.Errorf("clean target: blockers = %v, want none", b)
+	}
+	// An untracked file the merge doesn't touch never makes git merge fail.
+	writeFile(t, filepath.Join(repo, "notes.txt"), "scratch\n")
+	if b := blockers(); len(b) != 0 {
+		t.Errorf("unrelated untracked file: blockers = %v, want none", b)
+	}
+	// An untracked file at a path the branch adds would be overwritten.
+	writeFile(t, filepath.Join(repo, "feature.txt"), "mine\n")
+	if b := blockers(); len(b) != 1 || !strings.Contains(b[0], "feature.txt") {
+		t.Errorf("colliding untracked file: blockers = %v, want feature.txt", b)
+	}
+	if err := os.Remove(filepath.Join(repo, "feature.txt")); err != nil {
+		t.Fatal(err)
+	}
+	// Unstaged and staged tracked edits both block.
+	writeFile(t, filepath.Join(repo, "file.txt"), "edited\n")
+	if b := blockers(); len(b) != 1 || !strings.Contains(b[0], "file.txt") {
+		t.Errorf("modified file: blockers = %v, want file.txt", b)
+	}
+	gitCmd(t, repo, "add", "file.txt")
+	if b := blockers(); len(b) != 1 || !strings.Contains(b[0], "file.txt") {
+		t.Errorf("staged file: blockers = %v, want file.txt", b)
+	}
+
+	if _, err := MergeBlockers(t.TempDir(), "main", "feat"); err == nil {
+		t.Error("expected error on a non-repo")
+	}
+}
+
 func TestRunReportsStderr(t *testing.T) {
 	repo := newRepo(t)
 	_, err := run(repo, "not-a-real-subcommand")
